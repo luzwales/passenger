@@ -33,7 +33,7 @@ public partial class MainWindow
 
     private ToolWindows.PiAgentView MakePiAgent()
     {
-        ToolWindows.PiAgentView view = piAgent = new ToolWindows.PiAgentView(piAgentRuntime, () => session.Folder, () => session.Trusted);
+        ToolWindows.PiAgentView view = piAgent = new ToolWindows.PiAgentView(piAgentRuntime, () => session.Folder, () => session.Trusted, Popups);
         view.ApplyConfig(piAgentConfig, persist: false);
         view.SetSidebarOpen(piAgentSidebarOpen, notify: false);
         view.ActionRequested += (_, action) => Request(action);

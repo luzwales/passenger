@@ -140,6 +140,45 @@ public sealed class PiAgentTests
     }
 
     [AvaloniaFact]
+    public void Model_picker_popup_filters_models_and_passes_popup_rules()
+    {
+        PiAgentConfig config = new PiAgentConfig
+        {
+            Providers =
+            [
+                new AgentProviderEndpoint
+                {
+                    Id = "prv-router",
+                    Name = "router",
+                    Models =
+                    [
+                        AgentModelEntry.Create("gemini-3.8-flash", "Gemini 3.8 Flash", AgentThinkingLevel.Low, 4096, 500_000),
+                        AgentModelEntry.Create("gemini-4-hydrogen", "Gemini 4 Hydrogen", AgentThinkingLevel.High, 32_000, 1_048_576),
+                    ],
+                },
+            ],
+            ActiveProviderId = "prv-router",
+        }.Clamped();
+
+        string temp = TestFolders.Create("pi-popup-");
+        MainWindow window = Ui.OpenFolder(temp, languageServer: false);
+        try
+        {
+            PiAgentModelPickerPopup popup = new(config);
+            window.Popups.Show(popup, window.Popups.PointIn(window, new Avalonia.Point(120, 120)));
+            Ui.Settle();
+            Border frame = PopupFrame.FrameOf(popup)!;
+            UiRulesTests.HoldsToPopupRules("Pi Agent Model Picker", frame);
+            Assert.Equal(2, popup.VisibleModelIds.Count);
+            window.Popups.Close();
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void Settings_dialog_buttons_pass_layout_rules()
     {
         PiAgentConfig config = new PiAgentConfig

@@ -8,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Passenger.Agent;
+using Passenger.App.Agent;
 using Passenger.App.Docking;
 using Passenger.App.Settings;
 using Passenger.Core;
@@ -22,6 +23,7 @@ public sealed class PiAgentView : DockPanel
     private readonly PiAgentRuntime runtime;
     private readonly Func<string?> folderProvider;
     private readonly Func<bool> trustedProvider;
+    private readonly PopupHost? popups;
     private readonly ObservableCollection<ConversationItem> items = [];
     private readonly ObservableCollection<AgentAttachment> attachments = [];
     private readonly ObservableCollection<PiAgentSessionSummary> workspaceSessions = [];
@@ -62,11 +64,12 @@ public sealed class PiAgentView : DockPanel
     private bool sidebarOpen;
     private string? loadedWorkspace;
 
-    public PiAgentView(PiAgentRuntime runtime, Func<string?> folderProvider, Func<bool> trustedProvider)
+    public PiAgentView(PiAgentRuntime runtime, Func<string?> folderProvider, Func<bool> trustedProvider, PopupHost? popups = null)
     {
         this.runtime = runtime;
         this.folderProvider = folderProvider;
         this.trustedProvider = trustedProvider;
+        this.popups = popups;
 
         AutomationProperties.SetName(composer, "Pi Agent Prompt");
         AutomationProperties.SetName(sessionList, "Workspace Sessions");
@@ -433,6 +436,24 @@ public sealed class PiAgentView : DockPanel
 
     private void OpenModelPickerMenu()
     {
+        if (popups is not null && TopLevel.GetTopLevel(this) is Window owner)
+        {
+            PiAgentModelPickerPopup picker = new(config);
+            picker.ModelSelected += (_, selection) => SelectModel(selection.ProviderId, selection.ModelEntryId);
+            picker.ThinkingSelected += (_, level) => SetThinkingLevel(level);
+            picker.SettingsRequested += (_, _) =>
+            {
+                popups.Close();
+                ActionRequested?.Invoke(this, AppActions.PiAgentSettings);
+            };
+            Point? anchor = modelPickerButton.TranslatePoint(new Point(0, 0), owner);
+            Point? at = anchor is { } pt
+                ? popups.PointIn(owner, new Point(pt.X, Math.Max(Gaps.Normal, pt.Y - 340)))
+                : popups.PointIn(owner, new Point(Gaps.Group, Gaps.Group));
+            popups.Show(picker, at);
+            return;
+        }
+
         ContextMenu menu = new() { Placement = PlacementMode.TopEdgeAlignedRight };
         AgentProviderEndpoint? activeProvider = config.ActiveProvider;
         AgentModelEntry? activeModel = config.ActiveModelEntry;
@@ -465,7 +486,7 @@ public sealed class PiAgentView : DockPanel
         }
 
         menu.Items.Add(new Separator());
-        menu.Items.Add(ListMenus.Item("Configure Endpoints & Models…", () => ActionRequested?.Invoke(this, AppActions.PiAgentSettings), icon: IconKeys.Settings));
+        menu.Items.Add(ListMenus.Item("Provider Settings…", () => ActionRequested?.Invoke(this, AppActions.PiAgentSettings), icon: IconKeys.Settings));
         menu.Open(modelPickerButton);
     }
 

@@ -41,7 +41,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
     private readonly Button removeProviderButton = new() { Content = "Remove" };
     private readonly Button addModelButton = new() { Content = "Add Model" };
     private readonly Button removeModelButton = new() { Content = "Remove Model" };
-    private readonly TextBlock statusText = new() { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Classes = { StyleClasses.Muted } };
+    private readonly TextBlock statusText = new() { TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Classes = { StyleClasses.Muted } };
     private readonly PiAgentRuntime runtime;
 
     private int selectedProviderIndex = -1;
@@ -185,15 +185,15 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         maxTokensBox.TextChanged += (_, _) => CommitModelEdits();
         contextWindowBox.TextChanged += (_, _) => CommitModelEdits();
 
-        ToolFlow providerTools = new()
+        ToolFlow providerActions = new()
         {
             Spacing = Gaps.Small,
-            Margin = new Thickness(Gaps.Normal, Gaps.Normal, Gaps.Normal, Gaps.Small),
+            Margin = new Thickness(Gaps.Normal, Gaps.Small, Gaps.Normal, Gaps.Normal),
             Children = { addProviderButton, duplicateProviderButton, removeProviderButton },
         };
-        DockPanel leftDock = new() { Width = 240 };
-        DockPanel.SetDock(providerTools, Dock.Top);
-        leftDock.Children.Add(providerTools);
+        DockPanel leftDock = new() { Width = 250 };
+        DockPanel.SetDock(providerActions, Dock.Bottom);
+        leftDock.Children.Add(providerActions);
         leftDock.Children.Add(providerList);
         Border leftPane = new() { BorderThickness = Hairlines.After, Child = leftDock };
         leftPane.Bind(Border.BorderBrushProperty, leftPane.GetResourceObservable(TokenKeys.Divider));
@@ -214,6 +214,13 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             Children = { addModelButton, removeModelButton },
         };
 
+        ToolFlow probeRow = new()
+        {
+            Spacing = Gaps.Normal,
+            Children = { testButton, statusText },
+        };
+        ToolFlow.SetFills(statusText, new ToolLayout.Fills(80));
+
         StackPanel fields = new()
         {
             Spacing = Gaps.Normal,
@@ -226,6 +233,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
                 FormRows.Of("Protocol", protocolBox),
                 FormRows.Of("Base URL", baseUrlBox),
                 FormRows.Of("API Key", apiKeyBox),
+                FormRows.Of(null, probeRow),
                 new TextBlock
                 {
                     Text = "Models on this provider",
@@ -253,15 +261,9 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         DockPanel.SetDock(leftPane, Dock.Left);
         DockPanel body = new() { Children = { leftPane, rightScroll } };
 
-        DockPanel footerLeft = new() { LastChildFill = true };
-        DockPanel.SetDock(testButton, Dock.Left);
-        statusText.Margin = new Thickness(Gaps.Normal, 0, 0, 0);
-        footerLeft.Children.Add(testButton);
-        footerLeft.Children.Add(statusText);
-
         Button ok = DialogFooter.Default("Save");
         ok.Click += (_, _) => Accept();
-        Content = DialogFooter.Page(body, DialogFooter.OkCancel(ok, () => Close(false), left: footerLeft));
+        Content = DialogFooter.Page(body, DialogFooter.OkCancel(ok, () => Close(false)));
 
         Closed += (_, _) =>
         {
