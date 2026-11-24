@@ -142,10 +142,32 @@ public sealed class PiAgentTests
     [AvaloniaFact]
     public void Settings_dialog_buttons_pass_layout_rules()
     {
-        PiAgentSettingsDialog dialog = new(new PiAgentConfig(), new PiAgentRuntime());
+        PiAgentConfig config = new PiAgentConfig
+        {
+            Providers =
+            [
+                new AgentProviderEndpoint
+                {
+                    Id = "prv-test",
+                    Name = "router",
+                    Models =
+                    [
+                        AgentModelEntry.Create("first-model", "First Model", AgentThinkingLevel.Low, 4096, 128_000),
+                        AgentModelEntry.Create("second-model", "Second Model", AgentThinkingLevel.High, 16384, 512_000),
+                    ],
+                },
+            ],
+            ActiveProviderId = "prv-test",
+            ActiveModelEntryId = null,
+        }.Clamped();
+
+        PiAgentSettingsDialog dialog = new(config, new PiAgentRuntime());
         dialog.Show();
         try
         {
+            Assert.Equal("Provider Settings", dialog.Title);
+            dialog.SelectModel(1);
+            Assert.Equal(1, dialog.SelectedModelIndex);
             DialogButtonsTests.Check(dialog);
         }
         finally

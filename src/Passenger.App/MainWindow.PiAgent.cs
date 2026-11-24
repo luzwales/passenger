@@ -28,7 +28,7 @@ public partial class MainWindow
             ShowToolWindow(ToolWindowIds.PiAgent);
             PiAgentView.StartNewSession();
         }));
-        actions!.Add(new IdeAction(AppActions.PiAgentSettings, "Pi Agent Settings…", "Pi Agent", _ => IdeErrors.Observe(ShowPiAgentSettingsAsync())));
+        actions!.Add(new IdeAction(AppActions.PiAgentSettings, "Provider Settings…", "Pi Agent", _ => IdeErrors.Observe(ShowPiAgentSettingsAsync())));
     }
 
     private ToolWindows.PiAgentView MakePiAgent()

@@ -76,7 +76,7 @@ public sealed class PiAgentView : DockPanel
         sidebarToggle.Click += (_, _) => SetSidebarOpen(!sidebarOpen, notify: true);
 
         newSessionButton = ToolButtons.Of(AppActions.PiAgentNewSession, IconKeys.Add, "New Session", action => ActionRequested?.Invoke(this, action));
-        settingsButton = ToolButtons.Of(AppActions.PiAgentSettings, IconKeys.Settings, "Pi Agent Settings…", action => ActionRequested?.Invoke(this, action));
+        settingsButton = ToolButtons.Of(AppActions.PiAgentSettings, IconKeys.Settings, "Provider Settings…", action => ActionRequested?.Invoke(this, action));
         HeaderTools = new ShrinkingRow { Spacing = Gaps.Hair, Children = { sidebarToggle, newSessionButton, settingsButton } };
 
         attachButton = ToolButtons.Of(IconKeys.Add, "Attach File, Folder, or Image", OpenAttachMenu);
@@ -144,10 +144,10 @@ public sealed class PiAgentView : DockPanel
         Panel sidebarHost = new() { Children = { sessionList, sidebarEmpty } };
         sidebarFrame = new Border
         {
-            Classes = { StyleClasses.Framed },
-            Margin = new Thickness(Gaps.Normal),
+            BorderThickness = Hairlines.After,
             Child = sidebarHost,
         };
+        sidebarFrame.Bind(Border.BorderBrushProperty, sidebarFrame.GetResourceObservable(TokenKeys.Divider));
 
         DockPanel.SetDock(trustNotice, Dock.Top);
 
@@ -175,10 +175,13 @@ public sealed class PiAgentView : DockPanel
         };
         Border composerPanel = new()
         {
-            Classes = { StyleClasses.Framed },
+            BorderThickness = Hairlines.Round,
             Margin = new Thickness(Gaps.Normal, 0, Gaps.Normal, Gaps.Normal),
             Child = composerBox,
         };
+        composerPanel.Bind(Border.BorderBrushProperty, composerPanel.GetResourceObservable(TokenKeys.PopupBorder));
+        composerPanel.Bind(Border.BackgroundProperty, composerPanel.GetResourceObservable(TokenKeys.List));
+        composerPanel.Bind(Border.CornerRadiusProperty, composerPanel.GetResourceObservable(TokenKeys.ControlRadius));
         DockPanel.SetDock(composerPanel, Dock.Bottom);
 
         DockPanel chatPane = new() { LastChildFill = true };
@@ -589,7 +592,7 @@ public sealed class PiAgentView : DockPanel
         }
         if (config.ActiveModel is not { } profile || string.IsNullOrWhiteSpace(profile.ApiKey))
         {
-            turnStatus.Text = "Configure API Key in Pi Agent Settings";
+            turnStatus.Text = "Configure API Key in Provider Settings";
             ActionRequested?.Invoke(this, AppActions.PiAgentSettings);
             return;
         }
@@ -741,10 +744,13 @@ public sealed class PiAgentView : DockPanel
         StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = Gaps.Tight, Children = { label, remove } };
         Border chip = new()
         {
-            Classes = { StyleClasses.Framed },
+            BorderThickness = Hairlines.Round,
             Padding = new Thickness(Gaps.Small, Gaps.Hair),
             Child = row,
         };
+        chip.Bind(Border.BorderBrushProperty, chip.GetResourceObservable(TokenKeys.PopupBorder));
+        chip.Bind(Border.BackgroundProperty, chip.GetResourceObservable(TokenKeys.Button));
+        chip.Bind(Border.CornerRadiusProperty, chip.GetResourceObservable(TokenKeys.ControlRadius));
         remove.Click += (_, _) =>
         {
             if (chip.DataContext is AgentAttachment attachment)
@@ -764,11 +770,14 @@ public sealed class PiAgentView : DockPanel
         StackPanel bodyStack = new() { Spacing = Gaps.Tight, Children = { title, thinking, body } };
         Border card = new()
         {
-            Classes = { StyleClasses.Framed },
+            BorderThickness = Hairlines.Round,
             Margin = new Thickness(0, 0, 0, Gaps.Normal),
             Padding = new Thickness(Gaps.Normal),
             Child = bodyStack,
         };
+        card.Bind(Border.BorderBrushProperty, card.GetResourceObservable(TokenKeys.PopupBorder));
+        card.Bind(Border.BackgroundProperty, card.GetResourceObservable(TokenKeys.List));
+        card.Bind(Border.CornerRadiusProperty, card.GetResourceObservable(TokenKeys.ControlRadius));
         return card.Showing<ConversationItem>(item =>
         {
             title.DataContext = item;

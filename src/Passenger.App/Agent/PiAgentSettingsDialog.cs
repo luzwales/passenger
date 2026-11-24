@@ -1,19 +1,24 @@
+using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Passenger.Agent;
-using Passenger.App.Settings;
 using Passenger.App.ToolWindows;
 
 namespace Passenger.App.Agent;
 
-/// <summary>Configures Pi Agent provider endpoints, multiple models per endpoint, per-model thinking level,
+/// <summary>Configures LLM provider endpoints, multiple models per endpoint, per-model thinking level,
 /// context window, max tokens, and runs live connection probes.</summary>
 public sealed class PiAgentSettingsDialog : IdeWindow
 {
+    private const double Gutter = Gaps.Page;
+
+    private readonly ObservableCollection<ProviderRow> providerRows = [];
+    private readonly ObservableCollection<AgentModelEntry> modelRows = [];
     private readonly List<AgentProviderEndpoint> providers;
     private readonly ListBox providerList = new() { Classes = { StyleClasses.Tree } };
     private readonly ListBox modelList = new() { Classes = { StyleClasses.Tree } };
@@ -36,7 +41,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
     private readonly Button removeProviderButton = new() { Content = "Remove" };
     private readonly Button addModelButton = new() { Content = "Add Model" };
     private readonly Button removeModelButton = new() { Content = "Remove Model" };
-    private readonly TextBlock statusText = new() { TextWrapping = TextWrapping.Wrap, Classes = { StyleClasses.Muted } };
+    private readonly TextBlock statusText = new() { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Classes = { StyleClasses.Muted } };
     private readonly PiAgentRuntime runtime;
 
     private int selectedProviderIndex = -1;
@@ -55,11 +60,11 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             providers.Add(AgentProviderEndpoint.Create(AgentProviderKind.OpenAI));
         }
 
-        Title = "Pi Agent Settings";
+        Title = "Provider Settings";
         Width = DialogWidths.Workspace;
-        Height = 720;
+        Height = 700;
         MinWidth = 680;
-        MinHeight = 560;
+        MinHeight = 520;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
         AutomationProperties.SetName(providerList, "Provider Endpoints");
@@ -106,32 +111,36 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             return text.Showing<ThinkingChoice>(choice => text.Text = AgentThinkingCatalog.Label(choice.Level));
         });
 
+        providerList.ItemsSource = providerRows;
         ReusedRows.Use(providerList, () =>
         {
             TextBlock title = new() { Classes = { StyleClasses.Strong }, TextTrimming = TextTrimming.CharacterEllipsis };
             TextBlock sub = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
-            return new StackPanel
+            StackPanel stack = new()
             {
                 Spacing = Gaps.Hair,
                 Margin = new Thickness(Gaps.Small, Gaps.Tight),
                 Children = { title, sub },
-            }.Showing<AgentProviderEndpoint>(endpoint =>
+            };
+            return stack.Showing<ProviderRow>(row =>
             {
-                title.Text = endpoint.DisplayName;
-                sub.Text = $"{AgentProtocolCatalog.ShortLabel(endpoint.Protocol)} · {endpoint.Models.Count} model(s)";
+                title.Text = row.Title;
+                sub.Text = row.Subtitle;
             });
         });
 
+        modelList.ItemsSource = modelRows;
         ReusedRows.Use(modelList, () =>
         {
             TextBlock title = new() { Classes = { StyleClasses.Strong }, TextTrimming = TextTrimming.CharacterEllipsis };
             TextBlock sub = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
-            return new StackPanel
+            StackPanel stack = new()
             {
                 Spacing = Gaps.Hair,
                 Margin = new Thickness(Gaps.Small, Gaps.Tight),
                 Children = { title, sub },
-            }.Showing<AgentModelEntry>(entry =>
+            };
+            return stack.Showing<AgentModelEntry>(entry =>
             {
                 title.Text = entry.DisplayName;
                 sub.Text = $"{entry.ModelId} · Think: {AgentThinkingCatalog.Label(entry.ThinkingLevel)} · Max {entry.MaxTokens}";
@@ -151,14 +160,14 @@ public sealed class PiAgentSettingsDialog : IdeWindow
 
         providerList.SelectionChanged += (_, _) =>
         {
-            if (providerList.SelectedIndex >= 0 && providerList.SelectedIndex < providers.Count)
+            if (!loadingFields && providerList.SelectedIndex >= 0 && providerList.SelectedIndex < providers.Count)
             {
                 LoadProvider(providerList.SelectedIndex);
             }
         };
         modelList.SelectionChanged += (_, _) =>
         {
-            if (selectedProviderIndex >= 0 && modelList.SelectedIndex >= 0 && modelList.SelectedIndex < providers[selectedProviderIndex].Models.Count)
+            if (!loadingFields && selectedProviderIndex >= 0 && modelList.SelectedIndex >= 0 && modelList.SelectedIndex < providers[selectedProviderIndex].Models.Count)
             {
                 LoadModel(modelList.SelectedIndex);
             }
@@ -176,39 +185,42 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         maxTokensBox.TextChanged += (_, _) => CommitModelEdits();
         contextWindowBox.TextChanged += (_, _) => CommitModelEdits();
 
-        ToolFlow providerActions = new()
+        ToolFlow providerTools = new()
         {
             Spacing = Gaps.Small,
-            Margin = new Thickness(0, Gaps.Normal, 0, 0),
+            Margin = new Thickness(Gaps.Normal, Gaps.Normal, Gaps.Normal, Gaps.Small),
             Children = { addProviderButton, duplicateProviderButton, removeProviderButton },
         };
-        Border providerFrame = new() { Classes = { StyleClasses.Framed }, Child = providerList };
-        DockPanel leftPane = new() { LastChildFill = true, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
-        DockPanel.SetDock(providerActions, Dock.Bottom);
-        leftPane.Children.Add(providerActions);
-        leftPane.Children.Add(providerFrame);
+        DockPanel leftDock = new() { Width = 240 };
+        DockPanel.SetDock(providerTools, Dock.Top);
+        leftDock.Children.Add(providerTools);
+        leftDock.Children.Add(providerList);
+        Border leftPane = new() { BorderThickness = Hairlines.After, Child = leftDock };
+        leftPane.Bind(Border.BorderBrushProperty, leftPane.GetResourceObservable(TokenKeys.Divider));
 
-        Border modelFrame = new() { Classes = { StyleClasses.Framed }, Height = 104, Child = modelList };
+        Border modelFrame = new()
+        {
+            BorderThickness = Hairlines.Round,
+            Height = 132,
+            Child = modelList,
+        };
+        modelFrame.Bind(Border.BorderBrushProperty, modelFrame.GetResourceObservable(TokenKeys.PopupBorder));
+        modelFrame.Bind(Border.BackgroundProperty, modelFrame.GetResourceObservable(TokenKeys.List));
+        modelFrame.Bind(Border.CornerRadiusProperty, modelFrame.GetResourceObservable(TokenKeys.ControlRadius));
+
         ToolFlow modelButtons = new()
         {
             Spacing = Gaps.Small,
             Children = { addModelButton, removeModelButton },
         };
 
-        ToolFlow probeRow = new()
-        {
-            Spacing = Gaps.Normal,
-            Margin = new Thickness(0, Gaps.Tight, 0, 0),
-            Children = { testButton, statusText },
-        };
-        ToolFlow.SetFills(statusText, new ToolLayout.Fills(80));
-
         StackPanel fields = new()
         {
             Spacing = Gaps.Normal,
+            Margin = new Thickness(0, 0, Gutter, Gaps.Group),
             Children =
             {
-                new TextBlock { Text = "Endpoint", Classes = { StyleClasses.PaneTitle } },
+                new TextBlock { Text = "Provider", Classes = { StyleClasses.PaneTitle } },
                 FormRows.Of("Name", providerNameBox),
                 FormRows.Of("Preset", presetBox),
                 FormRows.Of("Protocol", protocolBox),
@@ -216,7 +228,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
                 FormRows.Of("API Key", apiKeyBox),
                 new TextBlock
                 {
-                    Text = "Models on this endpoint",
+                    Text = "Models on this provider",
                     Classes = { StyleClasses.PaneTitle },
                     Margin = new Thickness(0, Gaps.Tight, 0, 0),
                 },
@@ -228,16 +240,28 @@ public sealed class PiAgentSettingsDialog : IdeWindow
                 FormRows.Of("Max Tokens", maxTokensBox),
                 FormRows.Of("Context Window", contextWindowBox),
                 FormRows.Of("Temperature", temperatureBox),
-                probeRow,
             },
         };
 
-        ScrollViewer rightScroll = new() { Content = fields, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
-        PaneSplit split = new(leftPane, rightScroll, "250,1,*") { [DialogFooter.InsetProperty] = true };
+        ScrollViewer rightScroll = new()
+        {
+            Margin = new Thickness(Gaps.Page, Gaps.Group, 0, 0),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = fields,
+        };
+
+        DockPanel.SetDock(leftPane, Dock.Left);
+        DockPanel body = new() { Children = { leftPane, rightScroll } };
+
+        DockPanel footerLeft = new() { LastChildFill = true };
+        DockPanel.SetDock(testButton, Dock.Left);
+        statusText.Margin = new Thickness(Gaps.Normal, 0, 0, 0);
+        footerLeft.Children.Add(testButton);
+        footerLeft.Children.Add(statusText);
 
         Button ok = DialogFooter.Default("Save");
         ok.Click += (_, _) => Accept();
-        Content = DialogFooter.Page(split, DialogFooter.OkCancel(ok, () => Close(false)));
+        Content = DialogFooter.Page(body, DialogFooter.OkCancel(ok, () => Close(false), left: footerLeft));
 
         Closed += (_, _) =>
         {
@@ -253,13 +277,24 @@ public sealed class PiAgentSettingsDialog : IdeWindow
 
     public PiAgentConfig? Result { get; private set; }
 
+    public int SelectedProviderIndex => selectedProviderIndex;
+    public int SelectedModelIndex => selectedModelIndex;
+
+    public void SelectProvider(int index) => providerList.SelectedIndex = index;
+
+    public void SelectModel(int index) => modelList.SelectedIndex = index;
+
     private void RefreshProviderList(int selectIndex, string? preferredModelId = null)
     {
         int clamped = Math.Clamp(selectIndex, 0, Math.Max(0, providers.Count - 1));
         loadingFields = true;
         try
         {
-            providerList.ItemsSource = providers.ToList();
+            providerRows.Clear();
+            foreach (AgentProviderEndpoint endpoint in providers)
+            {
+                providerRows.Add(ProviderRow.From(endpoint));
+            }
             if (providers.Count > 0)
             {
                 providerList.SelectedIndex = clamped;
@@ -315,7 +350,11 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         loadingFields = true;
         try
         {
-            modelList.ItemsSource = list.ToList();
+            modelRows.Clear();
+            foreach (AgentModelEntry entry in list)
+            {
+                modelRows.Add(entry);
+            }
             if (list.Count > 0)
             {
                 modelList.SelectedIndex = clamped;
@@ -381,8 +420,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             providerNameBox.Text = updated.Name;
             protocolBox.SelectedItem = AgentProtocolCatalog.For(updated.Protocol);
             baseUrlBox.Text = updated.BaseUrl;
-            providerList.ItemsSource = providers.ToList();
-            providerList.SelectedIndex = selectedProviderIndex;
+            providerRows[selectedProviderIndex].Update(updated);
         }
         finally
         {
@@ -398,7 +436,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         }
         AgentProviderKind provider = presetBox.SelectedItem is AgentProviderPreset p ? p.Kind : providers[selectedProviderIndex].Provider;
         AgentProtocol protocol = protocolBox.SelectedItem is AgentProtocolOption opt ? opt.Kind : providers[selectedProviderIndex].Protocol;
-        providers[selectedProviderIndex] = (providers[selectedProviderIndex] with
+        AgentProviderEndpoint updated = (providers[selectedProviderIndex] with
         {
             Name = providerNameBox.Text ?? string.Empty,
             Provider = provider,
@@ -406,16 +444,8 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             BaseUrl = baseUrlBox.Text ?? string.Empty,
             ApiKey = apiKeyBox.Text ?? string.Empty,
         }).Clamped();
-        loadingFields = true;
-        try
-        {
-            providerList.ItemsSource = providers.ToList();
-            providerList.SelectedIndex = selectedProviderIndex;
-        }
-        finally
-        {
-            loadingFields = false;
-        }
+        providers[selectedProviderIndex] = updated;
+        providerRows[selectedProviderIndex].Update(updated);
     }
 
     private void CommitModelEdits()
@@ -438,8 +468,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             ? cw
             : existing.ContextWindow;
 
-        List<AgentModelEntry> updatedModels = [.. endpoint.Models];
-        updatedModels[selectedModelIndex] = (existing with
+        AgentModelEntry edited = (existing with
         {
             ModelId = modelIdBox.Text ?? string.Empty,
             Name = modelNameBox.Text ?? string.Empty,
@@ -448,14 +477,17 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             ContextWindow = contextWindow,
         }).Clamped(existing.ModelId);
 
-        providers[selectedProviderIndex] = (endpoint with { Models = updatedModels }).Clamped();
+        List<AgentModelEntry> updatedModels = [.. endpoint.Models];
+        updatedModels[selectedModelIndex] = edited;
+        AgentProviderEndpoint updatedEndpoint = (endpoint with { Models = updatedModels }).Clamped();
+        providers[selectedProviderIndex] = updatedEndpoint;
+
         loadingFields = true;
         try
         {
-            modelList.ItemsSource = providers[selectedProviderIndex].Models.ToList();
+            modelRows[selectedModelIndex] = edited;
             modelList.SelectedIndex = selectedModelIndex;
-            providerList.ItemsSource = providers.ToList();
-            providerList.SelectedIndex = selectedProviderIndex;
+            providerRows[selectedProviderIndex].Update(updatedEndpoint);
         }
         finally
         {
@@ -513,6 +545,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         AgentModelEntry added = AgentModelEntry.Create($"model-{list.Count + 1}");
         list.Add(added);
         providers[selectedProviderIndex] = (endpoint with { Models = list }).Clamped();
+        providerRows[selectedProviderIndex].Update(providers[selectedProviderIndex]);
         RefreshModelList(list.Count - 1);
     }
 
@@ -530,6 +563,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         List<AgentModelEntry> list = [.. endpoint.Models];
         list.RemoveAt(selectedModelIndex);
         providers[selectedProviderIndex] = (endpoint with { Models = list }).Clamped();
+        providerRows[selectedProviderIndex].Update(providers[selectedProviderIndex]);
         RefreshModelList(Math.Min(selectedModelIndex, list.Count - 1));
     }
 
@@ -613,6 +647,37 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             MaxTokens = chosenModel.MaxTokens,
         }.Clamped();
         Close(true);
+    }
+
+    private sealed class ProviderRow : Observable
+    {
+        private string title = string.Empty;
+        private string subtitle = string.Empty;
+
+        public string Title
+        {
+            get => title;
+            private set => Set(ref title, value);
+        }
+
+        public string Subtitle
+        {
+            get => subtitle;
+            private set => Set(ref subtitle, value);
+        }
+
+        public static ProviderRow From(AgentProviderEndpoint endpoint)
+        {
+            ProviderRow row = new();
+            row.Update(endpoint);
+            return row;
+        }
+
+        public void Update(AgentProviderEndpoint endpoint)
+        {
+            Title = endpoint.DisplayName;
+            Subtitle = $"{AgentProtocolCatalog.ShortLabel(endpoint.Protocol)} · {endpoint.Models.Count} model(s)";
+        }
     }
 
     private sealed record ThinkingChoice(AgentThinkingLevel Level);
