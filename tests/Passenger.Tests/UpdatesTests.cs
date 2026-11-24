@@ -294,7 +294,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
         Assert.True(github.Requests.Count == 1, $"The window asked for the latest release {github.Requests.Count} times as it started, not once");
 
         Assert.True(Notice(window) == $"Passenger {newer} available", $"A newer release, v{newer}, is out, but {UpdatesSaid(window)}");
-        string download = $"https://github.com/Zaneris/passenger/releases/download/v{newer}/{ThisSystemsDownload()}";
+        string download = $"https://github.com/luzwales/passenger/releases/download/v{newer}/{ThisSystemsDownload()}";
         Assert.True(window.UpdateShown?.Link.AbsoluteUri == download,
             $"The notice's link opens {window.UpdateShown?.Link}, not this system's download from the release, {download}");
         Assert.Contains(download, ToolTip.GetTip(window.FindControl<Button>("UpdateButton")!) as string ?? string.Empty);
@@ -800,7 +800,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
             $"A package that does not match its SHA-256 was refused without the person being told why: the status bar says '{said}'");
         Assert.Contains(said, ToolTip.GetTip(window.FindControl<Button>("UpdateButton")!) as string ?? string.Empty);
         Assert.Contains(Ui.IdeLog().Split('\n'), line => line.Contains($"Updates: {said}", StringComparison.Ordinal));
-        string page = $"https://github.com/Zaneris/passenger/releases/tag/v{newer}";
+        string page = $"https://github.com/luzwales/passenger/releases/tag/v{newer}";
         Assert.True(window.UpdateShown?.Link.AbsoluteUri == page, $"After a refusal the notice opens {window.UpdateShown?.Link}, not the release's page, {page}");
 
         Assert.Null(window.UpdateReady);
@@ -1105,6 +1105,23 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
             "Check for Updates had a copy that cannot update itself download the release");
         Assert.Equal("No update is downloaded and ready to install", window.Actions.WhyNot(AppActions.RestartToUpdate, window.Actions.Context()));
         window.Close();
+
+        // A portable copy, as App makes the person's window of one: it never replaces itself, and says what to put in its place.
+        string data = Path.Combine(settings, "Passenger", ThisCopy.DataName);
+        string portableBuild = Releases.ThisSystemsAsset(portable: true)!;
+        MainWindow portable = Started(elsewhere: Updater.Portable(data, portableBuild));
+        portable.WatchForUpdates();
+        Ui.Settle();
+        // Announced once per version already, by the window before: asked, it is said again.
+        CheckForUpdates(portable);
+        Assert.True(Notice(portable) == $"Passenger {newer} available", $"A portable copy does not say v{newer} is out: {UpdatesSaid(portable)}");
+        string tip = ToolTip.GetTip(portable.FindControl<Button>("UpdateButton")!) as string ?? string.Empty;
+        Assert.True(tip.Contains($"This copy of Passenger is portable, keeping its state in {data}, so it never replaces itself: put the release's {portableBuild} in its place", StringComparison.Ordinal),
+            $"A portable copy's notice does not say to put the release's portable build in its place: '{tip}'");
+        string page = $"https://github.com/luzwales/passenger/releases/tag/v{newer}";
+        Assert.True(portable.UpdateShown?.Link.AbsoluteUri == page, $"A portable copy links {portable.UpdateShown?.Link}, not the release's page, {page}");
+        Assert.True(files.Keys.All(name => github.RequestsFor(name).Length == 0), "A portable copy downloaded the release");
+        portable.Close();
     }
 
     /// <summary>The disk image is opened and let go of by diskutil image where macOS has it, hdiutil before; each puts the
@@ -1760,8 +1777,8 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
         Assert.SkipUnless(OperatingSystem.IsLinux(), LinuxAlone);
         using IDisposable theme = TestsTheme();
         LinuxInstall copy = new(TestFolders.Create("installed-"));
-        // As a package says it is one, beside the app it installs.
-        File.WriteAllText(Path.Combine(copy.Install, "app", LinuxUpdater.PackageMarker), "pacman\n");
+        // As a package says it is one, beside the app it installs, with the command that updates it.
+        File.WriteAllText(Path.Combine(copy.Install, "app", ThisCopy.PackageManagerName), "pacman\nyay -Syu passenger-ide-bin\n");
         string newer = Bumped(1, 0);
         IReadOnlyDictionary<string, byte[]> update = copy.Update(newer);
         github.Answer = Release($"v{newer}", files: update);
@@ -1771,9 +1788,9 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
 
         Assert.True(Notice(window) == $"Passenger {newer} available", $"A package manager's copy does not say v{newer} is out: {UpdatesSaid(window)}");
         string tip = ToolTip.GetTip(window.FindControl<Button>("UpdateButton")!) as string ?? string.Empty;
-        Assert.True(tip.Contains("This copy of Passenger is a package pacman installed: the system's package manager updates it.", StringComparison.Ordinal),
-            $"The notice does not say the package manager updates this copy: '{tip}'");
-        string page = $"https://github.com/Zaneris/passenger/releases/tag/v{newer}";
+        Assert.True(tip.Contains("This copy of Passenger is a package pacman installed: yay -Syu passenger-ide-bin updates it.", StringComparison.Ordinal),
+            $"The notice does not name the command the package manager's file gives, which updates this copy: '{tip}'");
+        string page = $"https://github.com/luzwales/passenger/releases/tag/v{newer}";
         Assert.True(window.UpdateShown?.Link.AbsoluteUri == page, $"A package manager's copy links {window.UpdateShown?.Link}, not only the release's page, {page}");
         string[] downloaded = [.. update.Keys.Where(name => github.RequestsFor(name).Length > 0)];
         Assert.True(downloaded.Length == 0, $"A package manager's copy downloaded {string.Join(", ", downloaded)}");
@@ -1791,12 +1808,12 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
     /// within the limit a person's Passenger gives GitHub, scaled to the run, or the test's own (a stand-in held to not
     /// answering); with the updater of a copy installed in a test folder, or, as every window but the person's own, none;
     /// counting a day between checks on the test's clock, looking whether one is due as often as the test says.</summary>
-    private MainWindow Started(Updater? updater = null, TimeSpan? feedLimit = null, TimeProvider? clock = null, TimeSpan? look = null)
+    private MainWindow Started(Updater? updater = null, TimeSpan? feedLimit = null, TimeProvider? clock = null, TimeSpan? look = null, UpdatedElsewhere? elsewhere = null)
     {
         ReleaseFeed feed = new(github.Listing, feedLimit ?? ReleaseFeed.ShortTimeout.Scaled());
         MainWindow window = new()
         {
-            Width = 1200, Height = 800, StateFolder = settings, Releases = feed, SelfUpdate = updater,
+            Width = 1200, Height = 800, StateFolder = settings, Releases = feed, SelfUpdate = updater, UpdatesElsewhere = elsewhere,
             UpdateClock = clock ?? TimeProvider.System, UpdateLook = look ?? TimeSpan.FromHours(1),
         };
         window.Show();
@@ -1889,7 +1906,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
             assets.Add(new JsonObject
             {
                 ["name"] = name,
-                ["browser_download_url"] = served is null ? $"https://github.com/Zaneris/passenger/releases/download/{tag}/{name}" : github.Serve(tag, name, served).AbsoluteUri,
+                ["browser_download_url"] = served is null ? $"https://github.com/luzwales/passenger/releases/download/{tag}/{name}" : github.Serve(tag, name, served).AbsoluteUri,
                 ["size"] = served?.Length ?? 1000,
             });
         }
@@ -1897,7 +1914,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
         {
             ["tag_name"] = tag,
             ["name"] = $"Passenger {tag}",
-            ["html_url"] = $"https://github.com/Zaneris/passenger/releases/tag/{tag}",
+            ["html_url"] = $"https://github.com/luzwales/passenger/releases/tag/{tag}",
             ["draft"] = draft,
             ["prerelease"] = prerelease,
             ["assets"] = assets,
@@ -2468,7 +2485,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
     /// request's head kept as it came. A file held is sent half way and the rest only once the test lets it go.</summary>
     internal sealed class StandIn : IDisposable
     {
-        private const string DownloadPath = "/Zaneris/passenger/releases/download/";
+        private const string DownloadPath = "/luzwales/passenger/releases/download/";
 
         private readonly List<string> heads = [];
         private readonly ConcurrentDictionary<string, byte[]> files = new(StringComparer.Ordinal);
@@ -2480,7 +2497,7 @@ public sealed class UpdatesTests : McpRig, IClassFixture<UpdatesTests.DiskImages
         public StandIn()
         {
             http = new StandInHttp(AnswerAsync);
-            Listing = new Uri($"{http.Root}/repos/Zaneris/passenger/releases");
+            Listing = new Uri($"{http.Root}/repos/luzwales/passenger/releases");
             Downloads = new Uri(http.Root + DownloadPath);
         }
 

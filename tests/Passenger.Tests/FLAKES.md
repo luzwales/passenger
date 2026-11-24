@@ -28,6 +28,114 @@ the gate until it is rewritten, and a report-lane failure is an issue (`ci-repor
   - Outside the code: 7 (the runner, GitHub, xunit, Rosetta).
   - Unlabelled: 7.
 
+## 2026-11-23
+
+- `CodeAssistTests`' `Reformat_and_what_a_completion_or_fix_writes_keep_the_files_indent_and_line_breaks_and_only_their_own_file`,
+  CI 45269750967 (Windows report shard 3), at f512f7ead: "One Undo of dotnet format's run left Crooked.cs as:" its
+  laid-out text. **A race in the IDE**, from #2156's dotnet format (e5dd778d7): on Windows dotnet format writes CRLF
+  into the lines it changes in an LF file, and the folder's watcher took that text into the open file as a step of its
+  own while dotnet format ran, before `CodeActions.TakeFormatted` put the file's own breaks back as a second step; the
+  Explorer's Undo steps an open file back once, leaving the watcher's text ("    {\r\n"). The steps the file took since
+  dotnet format began are now joined into one, and the step's dotnet format hands its run back only once the watcher has
+  taken what it wrote, so the race goes one way every run (f8932d514): without the fix the step fails so on the Windows
+  VM every run, with it it passes there and on the Mac.
+- `HistoryTests`' `A_files_or_a_folders_history_lists_the_commits_that_touched_it_as_git_names_it_and_shows_what_each_did`,
+  CI 45269750967 (Windows gate shard 1, Linux report shard 3), at f512f7ead: "Assert.Equal() Failure: Collections
+  differ … Actual: [… "Show History", "Add to .gitignore", "Go to Ignoring Line"]". **The test**: #2140 (07b49a57c) gave
+  the Explorer's Git menu Add to .gitignore and Go to Ignoring Line, and the step's list of a file's Git menu still
+  named the three items before them alone; it names all five (94524751e). The class runs on no macOS job.
+- `GitFileFormsTests`' `A_file_git_keeps_in_another_form_than_the_disks_shows_only_what_changed_and_rolls_back_in_its_own_form`,
+  CI 45269750967 (macOS gate shard 1's job, Linux report shard 2, Windows report shard 1), at f512f7ead: "Expected: Line
+  separators changed: 3 lines from LF to CRLF; Actual: Line separators changed: 3 lines from LF to CRLF\n--- a/kept.txt
+  …". **The test**: #2154 (e6ddf911e) has vcs_status follow those words with git's own diff of a file git stores as
+  written, each CR in it, and changed McpTests' step to match, while this step's kept.txt (`-text`) still wanted the
+  words alone; it now wants the words then git's diff (8a0648320). Its failed step left its window open over its deleted
+  folder, which failed DiscordTests after it on Windows (the rig's line below).
+- `AboutMacOSRulesTests`'
+  `A_report_class_that_reaches_macOSs_own_behaviour_is_marked_to_run_there_and_a_marked_one_reaches_it`, CI 45269750967
+  (Linux gate shard 2, Windows gate shard 2), at f512f7ead: "EslintPrettierTests reaches macOS's own behaviour, yet
+  macOS's report lane passes it over: it asks whether it runs on macOS: … → System.OperatingSystem::IsMacOS". **The
+  test**: Biome's step, new in b1e049a28 (#2158), asked in the class's own code whether it ran on macOS, to skip where
+  the run's Biome home leaves the daemon's socket path too long. The rig answers that now (`TestRun.BiomeSocketUnfit`,
+  7c0e5f7c2), the class staying off macOS's report lane; the rule passes on the Mac and both VMs.
+- `EslintPrettierTests`' `Eslint_checks_and_fixes_as_its_server_says`, CI 45269750967 (Linux report shard 3, Windows
+  report shard 1), at f512f7ead: "Yarn could not lay … out (exit code 1): … YN0028: The lockfile would have been
+  modified by this install, which is explicitly forbidden". **The test**: the Plug'n'Play step, new in 926ece8c9
+  (#2157), wrote an empty yarn.lock for Yarn to fill, and Yarn refuses by default to change a lockfile where CI is set,
+  as on every CI runner, never on a developer's machine. The step runs yarn install --no-immutable (d3e02e0be) and
+  passes on the Mac and the Linux VM with CI=true.
+- `CommandLineTests`' `A_start_that_fails_says_why_once_and_a_relative_state_folder_is_where_it_started`, CI 45269750967
+  (macOS report shard 2), at f512f7ead: "A data file beside a copy did not end its start saying so, as a malformed flag
+  does: exit code 2 passenger: /private/var/folders/…/Passenger/data is no folder". **The test**: its portable copy
+  step, new in 8523f38ef (#2153), compared the copy's words with the path it made under the run's folder, which on
+  macOS's runners is reached through /var's link (`just test` runs under /private/tmp's real path), where the copy names
+  its data by its own real path; the copy refused the file as it should. The step compares the files (3ebfef49c) and
+  passes on the Mac with the temporary folder under /var, and on both VMs.
+- `NativeMenusTests`'
+  `The_Docks_menu_follows_the_recent_list_through_a_closed_solution_a_second_window_and_its_own_items`, CI 45269750967
+  (macOS report shard 4, in gate shard 1's job): "The Dock's New Window left 3 windows, so its item did nothing once its
+  menu followed a change"; and `DiscordTests`' `Discord_shows_what_the_person_chose_from_their_own_window_alone`
+  (Windows report shard 1): "Assert.Single() Failure: The collection contained 2 matching items", indices 0 and 2. **The
+  rig**: each ran after `GitFileFormsTests`' failed step in its process. A failed flow step's instance takes its folder
+  with it before the test ends, so the window's close as the test ended saved into a folder that was gone, was refused,
+  and asked about the unsaved file instead, leaving the window in `PassengerApp.Windows` for the next test. A window a
+  test leaves now closes unsaved (2af51482c): the failed GitFileFormsTests flow left one window on the Mac without it
+  and none with it.
+- The Debug relay job, CI 45269750967: cancelled after 15 minutes with no step run, "The job was not acquired by Runner
+  of type hosted even after multiple attempts", GitHub's notice "Due to capacity constraints, jobs targeting macOS arm64
+  runners may experience longer queue times" beside it. **Outside the code**: GitHub had no macOS arm64 runner for it
+  (the run's macOS gate shard 2 waited 20 minutes for one); a rerun of the job builds it.
+- `XamlBreakpointsTests`' `A_XAML_breakpoint_stops_as_its_control_is_made_or_its_property_set_at_the_editors_line`,
+  CI 45219084616 (Linux report shard 2; Windows gate shard 1's job), at 43e51aa43, the first run on Avalonia 12.2:
+  "Waited 40 s for the status bar to say "binding", not "… Text on TextBlock#Caption is changed (Previous Value:
+  "Hello", New Value: "Renamed", its local value)"", and on Windows only "Access to the path 'Avalonia.Base.dll' is
+  denied". **A
+  regression in the IDE, from the move to Avalonia 12.2** (81c3e9c92): 12.2 makes a compiled binding to one member of
+  the DataContext a typed expression derived from no untyped one, the only kind the inspector read, so Break When Value
+  Changes took the binding's change for a local value, the Properties page named no binding and a XAML file's binding
+  values said none; on Windows the failed step left its debugged app holding its folder, whose removal failed, and the
+  step said that alone. The inspector reads either kind (4765d7f7f), and a step's own failure is said before its
+  clean-up's (8527126b7). Without the first the step fails on the Mac with "The caption's Text row named no binding" and
+  BindingValuesTests' typed Title with "Strings differ"; with it both pass on the Mac and the Linux VM, and
+  XamlBreakpointsTests on the Windows VM. The class runs on no macOS job, which runs only `[AboutMacOS]` classes.
+- `Debugging.StuckEvaluationTests`' `An_evaluation_that_cannot_be_stopped_or_ends_late_leaves_the_program_paused_and_going_on_whole`,
+  CI 45219084616 (Windows report shard 3), at 43e51aa43: "The engine's log did not name the read the evaluation stood in
+  outside managed code by its native frames", the log saying "natively: ntdll.dll!ZwReadFile+0x14 <
+  KERNELBASE.dll!ReadFile+0x8d". **The test**: its check, new in 54bb36f95 and met before only on Windows on Arm, where
+  dbghelp names the read NtReadFile, looked for that name alone, and ntdll exports the read as NtReadFile and as
+  ZwReadFile at one address, which dbghelp names ZwReadFile on x64; it takes either (4c4a09c24) and passes on the
+  Windows VM.
+- `MauiSimulatorTests`' `A_maui_apps_ios_head_debugged_on_a_simulator_stops_steps_evaluates_and_takes_a_hot_reload_edit`,
+  CI 45219084616 (macOS report shard 3, a 7 GB runner with 0.7 GB free at the least), at 43e51aa43, after 9 minutes 55
+  s: "MauiApp1 could not be installed on iPhone 17 - iOS 27.2: simctl did not finish installing it in 3 minutes". **A
+  limit in the IDE, on a starved runner**: the first install of a simulator's boot starts the simulator's install
+  services and has them make their first pass since the boot, 7 to 27 s on the Mac against under 2 s for the same app's
+  next install, and the class, its shard's first iOS test since the simulator is no longer booted before the tests
+  (b98279487), took the runner's first boot of its simulator and that first install, which ran past the IDE's 3 minutes
+  for any simctl command. An install is now waited for as long as it goes, as an Android device's is, Stop ending it
+  (1d5ae08da), and a start the window refuses in a device test now ends with the IDE's log, which times each program
+  the start ran, where it said nothing of the six minutes before the install (795a9dfe1). On that runner the test would
+  still have spent its 9.5 minutes: the first boot and first install inside the shard's first iOS test are the deal's,
+  which b98279487 chose. The test passes on the Mac in 1:14 to 1:32 (build 17 s, boot 8 s, install 17 s).
+- `ExplorerFilesTests`' `A_loaded_projects_folders_rename_waits_for_a_walk_of_its_build_output_under_way_for_the_language_server`,
+  CI 44870878221 (Windows report shard 2), at 086fccf1b: "Assert.Null() Failure: Value is not null … Actual: "Lib could
+  not be renamed: Access to the path 'C:\\"···". **A race in the IDE**: the window asks the C# language server whether
+  its source generators have run as a load ends, and Passenger's extension answers by reading each document the
+  projects' builds wrote, so the server opened Lib's in turn, a fraction of a millisecond each, as Lib moved, and Windows
+  moves no folder with a file under it open; a Kernel-File trace of 12 renames under load on the Windows VM caught those
+  reads 66 and 76 ms before the rename in both it covered, nothing else reading under Lib. A folder let go of for a
+  move or a delete now has the generators' questions read nothing under it, and waits for one asked before
+  (`RoslynSession.LetGo`) (4aa953148).
+- `ContainerProfilingTests`' `A_program_in_a_container_is_profiled_and_snapshotted_there_debugged_or_held_at_its_start`,
+  CI 45088645427 (Linux, the report work in gate shard 2's job), at 4a288a12f: "The flow's step 2 failed … The IDE was not
+  quiet within 180 s. Still busy: background work begun at ProfilerCommands.cs:1172, for 3 minutes", with
+  `passenger-tools heap --pid 1` still running in the container. **A wait in the IDE with no limit**: the container
+  tools' snapshot made requests of the program's runtime with no limit (the sessions' starts through
+  `SessionStarts.OnAsync`, the induced collection's start, the runtime's dump), and the IDE's own limit, 10 minutes, said
+  nothing of where they stood, so which request the runtime left unanswered is unknown; not seen in about 120 tries on
+  the Mac and the Ubuntu VM. Each request now has a limit, the tools say each stage as it begins, and a snapshot that
+  stops fails naming its stage (SnapshotStages), held by the step itself with the program's runtime stopped (d4cb1c2d4).
+
 ## 2026-11-22
 
 - `McpAspireStandInTests`' `An_agent_runs_an_AppHost_its_resources_commands_and_one_replicas_debugging_as_the_AppHost_…`,

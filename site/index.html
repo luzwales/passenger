@@ -39,9 +39,9 @@
     "url": "https://passenger-ide.net/",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Windows, macOS, Linux",
-    "softwareVersion": "0.4.2",
+    "softwareVersion": "0.4.3",
     "downloadUrl": "https://github.com/Zaneris/passenger/releases",
-    "releaseNotes": "https://github.com/Zaneris/passenger/releases/tag/v0.4.2",
+    "releaseNotes": "https://github.com/Zaneris/passenger/releases/tag/v0.4.3",
     "offers": {
         "@type": "Offer",
         "price": "0",
@@ -107,8 +107,8 @@
 <main id="main">
     <div class="hero">
         <div class="wrap">
-            <a class="news" href="#mobile"><span class="tag">New in 0.4.0</span>
-                <span class="what">.NET MAUI and mobile apps, run and debugged on a device, emulator or simulator</span><span class="short">What's
+            <a class="news" href="#portable"><span class="tag">New in 0.4.3</span>
+                <span class="what">Portable builds: unpack Passenger anywhere, a USB stick included, its settings kept beside it</span><span class="short">What's
                 new</span><span class="arrow" aria-hidden="true">&rarr;</span></a>
             <h1><span class="lead">Debugger, profiler and Hot&nbsp;Reload, built&nbsp;in.</span> The free IDE for C# and .NET.</h1>
             <p class="lede">Stop at a breakpoint and read every line's values, change the code while it runs, on your
@@ -664,10 +664,10 @@
                 <div class="text">
                     <h3>The web languages</h3>
                     <p>JavaScript, TypeScript, HTML, CSS, SCSS, Less, JSON, Dockerfiles and YAML through their language
-                        servers: completion, checks, navigation and formatting, TypeScript on the project's own version and
-                        JSON against its schema. ESLint's problems show as you type with its fixes, the project's own
-                        Prettier formats on Reformat Code and on save, and a class attribute completes from every stylesheet
-                        the page uses.</p>
+                        servers on Node.js, Bun or Deno: completion, checks, navigation and formatting, TypeScript on the
+                        project's own version and JSON against its schema. The project's own ESLint, Oxlint and Biome show
+                        their problems as you type with their fixes, its Prettier, Oxfmt or Biome formats on Reformat Code
+                        and on save, and a class attribute completes from every stylesheet the page uses.</p>
                 </div>
                 <figure class="shot">
                     <picture>
@@ -896,7 +896,7 @@
                 </details>
                 <details>
                     <summary>Is it ready for daily work?</summary>
-                    <p>Passenger is young (0.4.2), and its own development runs through it every day: the coding agents
+                    <p>Passenger is young (0.4.3), and its own development runs through it every day: the coding agents
                         that write much of it work through its MCP server. Its tests drive the whole IDE, a window with real
                         keys and clicks, on macOS, Windows and Linux, and a release ships only once its core tests pass
                         on all three. Each release's notes say what it does and its known limits, so you can judge for
@@ -976,6 +976,19 @@
                         Windows.</p>
                     <a class="more" href="/linux">How to install on Linux</a>
                 </div>
+                <div class="platform portable" id="portable">
+                    <h3>Portable</h3>
+                    <ul>
+                        <li><a data-asset="Passenger-windows-x64-portable.zip" href="https://github.com/Zaneris/passenger/releases/latest/download/Passenger-windows-x64-portable.zip">Windows x64 <span class="kind">.zip</span></a></li>
+                        <li><a data-asset="Passenger-windows-arm64-portable.zip" href="https://github.com/Zaneris/passenger/releases/latest/download/Passenger-windows-arm64-portable.zip">Windows Arm64 <span class="kind">.zip</span></a></li>
+                        <li><a data-asset="Passenger-macos-arm64.zip" href="https://github.com/Zaneris/passenger/releases/latest/download/Passenger-macos-arm64.zip">macOS, Apple Silicon <span class="kind">.zip</span></a></li>
+                        <li><a data-asset="Passenger-macos-x64.zip" href="https://github.com/Zaneris/passenger/releases/latest/download/Passenger-macos-x64.zip">macOS, Intel <span class="kind">.zip</span></a></li>
+                    </ul>
+                    <p class="note">Unpack it anywhere, a USB stick included, and make a folder named <code>data</code>
+                        in the Passenger folder it gives. That copy keeps its settings, layout, trusted folders and
+                        history there, never in your own folders, and says when a release is out without replacing
+                        itself. Linux's archive is portable the same way.</p>
+                </div>
             </div>
             <div class="needs">
                 <p>Passenger needs:</p>
@@ -985,9 +998,10 @@
                         installs one in a step once you agree. Its own language server, project host and debugger run on
                         the .NET it carries, whatever the machine has.</li>
                     <li><strong><a href="https://git-scm.com/downloads">Git</a></strong>, for version control.</li>
-                    <li><strong><a href="https://nodejs.org/">Node.js</a></strong>, for JavaScript, TypeScript, HTML, CSS,
-                        JSON, Dockerfiles and YAML: 22.22.2 or later for TypeScript, 22.15 or later for YAML. C#, XAML,
-                        GDScript and shaders do without it.</li>
+                    <li><strong><a href="https://nodejs.org/">Node.js</a></strong>, or <a href="https://bun.sh/">Bun</a> or
+                        <a href="https://deno.com/">Deno</a> for a folder that uses one, for JavaScript, TypeScript, HTML,
+                        CSS, JSON, Dockerfiles and YAML: Node.js 22.22.2 or later for TypeScript, 22.15 or later for YAML.
+                        C#, XAML, GDScript and shaders do without them.</li>
                     <li><strong>Chrome, Edge or another Chromium browser</strong>, for debugging Blazor's WebAssembly.</li>
                     <li><strong>For mobile apps</strong>, .NET's workload for each platform, with the Android SDK and a JDK
                         for Android, which Passenger installs once you agree, and Xcode on a Mac for iOS and Mac

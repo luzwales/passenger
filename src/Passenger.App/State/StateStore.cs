@@ -27,6 +27,9 @@ public sealed class StateStore
     /// <summary>The file of the templates New Solution and New Project made something from lately (<see cref="Templates"/>).</summary>
     public const string TemplatesFile = "recentTemplates.json";
 
+    /// <summary>The file of what New Solution made for Git with the last solution (<see cref="NewSolution"/>).</summary>
+    public const string NewSolutionFile = "newSolution.json";
+
     /// <summary>The stores open in this process by their folder, each shared by the windows keeping their state there. UI
     /// thread only.</summary>
     private static readonly Dictionary<string, StateStore> Shared = new(StringComparer.Ordinal);
@@ -53,6 +56,7 @@ public sealed class StateStore
         Trust = new(Path.Combine(root, "trust.json"));
         Templates = new(Path.Combine(root, TemplatesFile));
         PiAgent = new(Path.Combine(root, "piAgent.json"));
+        NewSolution = new(Path.Combine(root, NewSolutionFile));
         // Before this process writes any: a change is written a moment after it is made, and only through this store.
         UsedBefore = new[] { Path.Combine(root, SettingsFile), Layout.Path, Recent.Path, Updates.Path }.Any(File.Exists)
             || Directory.Exists(Path.Combine(root, "workspaces"));
@@ -66,8 +70,9 @@ public sealed class StateStore
     [IdentifierHome]
     public const string Variable = "PASSENGER_SETTINGS";
 
-    /// <summary>The folder: PASSENGER_SETTINGS names it, else the user's local application data.</summary>
-    public static string DefaultRoot => Named ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Passenger");
+    /// <summary>The folder: PASSENGER_SETTINGS names it, else a portable copy's data folder (<see cref="ThisCopy.Data"/>),
+    /// else the user's local application data.</summary>
+    public static string DefaultRoot => Named ?? ThisCopy.Data ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Passenger");
 
     /// <summary>The state folder made the person's alone as Passenger starts (<see cref="Containers.OwnFiles.Folder"/>, one an
     /// earlier Passenger made put right), its logs with all they hold (<see cref="Containers.OwnFiles.Tree"/>): Local History
@@ -88,17 +93,24 @@ public sealed class StateStore
         }
     }
 
-    /// <summary>The folder PASSENGER_SETTINGS names, or null where it names none.</summary>
-    public static string? Named => Environment.GetEnvironmentVariable(Variable) is { Length: > 0 } folder ? folder : null;
+    /// <summary>The folder PASSENGER_SETTINGS names, or null where it names none or this portable copy's own data folder,
+    /// which it gave the programs it starts (<see cref="NameWhole"/>).</summary>
+    public static string? Named => Environment.GetEnvironmentVariable(Variable) is { Length: > 0 } folder
+        && !(ThisCopy.Data is { } data && PathNames.Same(folder, data)) ? folder : null;
 
     /// <summary>Makes a folder PASSENGER_SETTINGS names by a relative path the one it names from the folder Passenger was
-    /// started in, before Passenger leaves that folder for the person's home: this process and every program it starts
-    /// (a terminal's shell, a Godot editor's addon, another Passenger) then take the same folder.</summary>
+    /// started in, before Passenger leaves that folder for the person's home, and names a portable copy's data folder where
+    /// it names none: this process and every program it starts (a terminal's shell, a Godot editor's addon, another
+    /// Passenger) then take the same folder.</summary>
     public static void NameWhole()
     {
         if (Named is { } named && !Path.IsPathFullyQualified(named))
         {
             OwnEnvironment.Set(Variable, Path.GetFullPath(named));
+        }
+        else if (Named is null && ThisCopy.Data is { } data)
+        {
+            OwnEnvironment.Set(Variable, data);
         }
     }
 
@@ -175,6 +187,9 @@ public sealed class StateStore
     /// <summary>The Pi Agent's model profiles, active model, and sampling settings.</summary>
     public StateDocument<PiAgentState> PiAgent { get; }
 
+    /// <summary>What New Solution made for Git with the last solution, which it offers next.</summary>
+    public StateDocument<Passenger.App.Templates.RepositoryChoices> NewSolution { get; }
+
     /// <summary>A folder's own documents, held for a window that has the folder open or is opening it until it lets them go
     /// (<see cref="LetGo"/>); every window holding the folder shares them.</summary>
     public ProjectState Hold(string folder)
@@ -222,6 +237,7 @@ public sealed class StateStore
         Trust.Flush();
         Templates.Flush();
         PiAgent.Flush();
+        NewSolution.Flush();
         foreach ((ProjectState documents, _) in projects.Values)
         {
             documents.Flush();

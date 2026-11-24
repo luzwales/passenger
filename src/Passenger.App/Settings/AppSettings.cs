@@ -148,6 +148,10 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// a language's own on-save formatting takes (Prettier's Run on save, GDScript's Reformat on save).</summary>
     public bool ReformatOnSave { get; init; }
 
+    /// <summary>"C# formatter": what lays C# out for Reformat Code, Code Cleanup and Reformat on save, Passenger's own (the
+    /// language server's) at first.</summary>
+    public CSharpFormatter CSharpFormatter { get; init; }
+
     /// <summary>"Ensure a final line break on save": every save, autosave too, ends a file with a line break where no
     /// .editorconfig sets <c>insert_final_newline</c> for it.</summary>
     public bool EnsureFinalLineBreak { get; init; }
@@ -313,6 +317,10 @@ public sealed record AppSettings : IStateDocument<AppSettings>
     /// <summary>The Node.js the JavaScript, TypeScript, HTML, CSS and JSON language servers run on, or null for the
     /// first on the PATH as the login shell finds it.</summary>
     public string? NodeInterpreter { get; init; }
+
+    /// <summary>The runtime the web language servers, ESLint and Prettier run on: the one the folder's lockfile says (Bun's
+    /// or Deno's, else Node.js), or Node.js, Bun or Deno whatever it says.</summary>
+    public RuntimeChoice WebRuntime { get; init; } = RuntimeChoice.FromLockfile;
 
     /// <summary>The browser a web app's page opens in, and Debug drives to debug a Blazor app's WebAssembly half, with
     /// arguments given every start of it, as one command line (<see cref="Run.PageBrowsers"/>); null for the system's default
@@ -728,6 +736,19 @@ public enum BuildResultsMode
     Never,
 }
 
+/// <summary>The runtime the web language servers, ESLint and Prettier run on, in the order Settings lists them.</summary>
+public enum RuntimeChoice
+{
+    /// <summary>The one the folder's lockfile says (<see cref="Passenger.Workspace.NodeProjects.RuntimeOf"/>).</summary>
+    FromLockfile,
+
+    Node,
+
+    Bun,
+
+    Deno,
+}
+
 /// <summary>How ESLint and Prettier are configured, in the order Settings lists them.</summary>
 public enum ToolConfiguration
 {
@@ -763,6 +784,14 @@ public enum ConfirmClosing
     Never,
     WhenQuitting,
     EveryWindow,
+}
+
+/// <summary>What lays C# out, in the order Settings lists them: Passenger's own (the C# language server), or the SDK's
+/// dotnet format.</summary>
+public enum CSharpFormatter
+{
+    Passenger,
+    DotnetFormat,
 }
 
 /// <summary>Where a diff opens, in the order Settings lists them.</summary>

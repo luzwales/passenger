@@ -9,7 +9,7 @@ namespace Passenger.Lsp;
 /// <summary>Roslyn's language server working on one folder: it opens the solution it is given (or, with
 /// none, the projects) and keeps every open C# document in step. Requests are made per document
 /// (<see cref="LspDocument"/>), in the editor's own offsets.</summary>
-public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
+public sealed partial class RoslynSession : IAsyncDisposable, IDocumentHost
 {
     private readonly Dictionary<string, LspDocument> documents = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource coloured = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -34,11 +34,20 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
             }
             Loaded?.Invoke(this, EventArgs.Empty);
         };
-        // A server that ended by itself opens nothing more (OpenRestAsync).
-        server.Exited += (_, _) => ending.Cancel();
-        // Builds given as what they read changed (a restore landing) load again: the server never reloads for that itself.
+        // A server that ended by itself opens nothing more (OpenRestAsync), and loads nothing.
+        server.Exited += (_, _) =>
+        {
+            ending.Cancel();
+            EndLoads();
+        };
+        server.Logged += (_, said) => HearLoads(said.Message);
         server.ProjectGiven += (_, built) =>
         {
+            if (built.Infos is { } infos)
+            {
+                Loading(built.Project, infos);
+            }
+            // Builds given as what they read changed (a restore landing) load again: the server never reloads for that itself.
             if (built.Stale)
             {
                 Reload([built.Project]);
@@ -121,7 +130,8 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
         {
             cancel.ThrowIfCancellationRequested();
             started?.Invoke(server);
-            if (feeding is not null && !await HasLoaderAsync(server, cancel).ConfigureAwait(false))
+            LoaderReady? loader = feeding is null ? null : await LoaderAsync(server, cancel).ConfigureAwait(false);
+            if (feeding is not null && loader is null)
             {
                 // The server builds its projects itself; the builds asked for are kept for the folder's next opening.
                 Observe(feeding);
@@ -132,6 +142,7 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
             feeding = null;
             if (asked is not null && await asked.ConfigureAwait(false) is { } fed)
             {
+                session.Heard(loader!);
                 server.Feed = feed;
                 session.Fed = true;
                 server.WatchedFiles.HasLoader = true;
@@ -147,11 +158,11 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
                 if (before.Count > 0)
                 {
                     session.Expect(2);
-                    await server.NotifyAsync(ProjectMethods.Load, new LoadProjectsParams(before, solution)).ConfigureAwait(false);
-                    Core.UnawaitedWork.Observe(session.OpenRestAsync(() => server.NotifyAsync(ProjectMethods.Load, new LoadProjectsParams(rest, solution))));
+                    await session.LoadAsync(before).ConfigureAwait(false);
+                    Core.UnawaitedWork.Observe(session.OpenRestAsync(() => session.LoadAsync(rest)));
                     return session;
                 }
-                await server.NotifyAsync(ProjectMethods.Load, new LoadProjectsParams(rest, solution)).ConfigureAwait(false);
+                await session.LoadAsync(rest).ConfigureAwait(false);
                 return session;
             }
             IReadOnlyList<string> ahead = first is null ? [] : await first().ConfigureAwait(false);
@@ -219,17 +230,31 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
         }
     }
 
-    /// <summary>Whether the server has Passenger's project loader (the extension composed with it), which answers so.</summary>
-    private static async Task<bool> HasLoaderAsync(LanguageServer server, CancellationToken cancel)
+    /// <summary>The answer of the server's project loader where it has Passenger's (the extension composed with it); null
+    /// where it refuses the question.</summary>
+    private static async Task<LoaderReady?> LoaderAsync(LanguageServer server, CancellationToken cancel)
     {
         try
         {
-            return await server.RequestAsync<bool>(ProjectMethods.Ready, new { }, cancel).ConfigureAwait(false);
+            return await server.RequestAsync<LoaderReady>(ProjectMethods.Ready, new { }, cancel).ConfigureAwait(false);
         }
         catch (LanguageServerFailed)
         {
-            return false;
+            return null;
         }
+    }
+
+    /// <summary>Has the server load projects, those given their builds loading from then on (<see cref="Loading"/>).</summary>
+    private Task LoadAsync(IReadOnlyList<ProjectToOpen> projects)
+    {
+        foreach (ProjectToOpen project in projects)
+        {
+            if (project.Infos is { } infos)
+            {
+                Loading(project.Path, infos);
+            }
+        }
+        return Server.NotifyAsync(ProjectMethods.Load, new LoadProjectsParams(projects, Solution));
     }
 
     /// <summary>Whether the server loads its projects from the client's design-time builds (<see cref="IProjectFeed"/>)
@@ -338,9 +363,67 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
 
     /// <summary>Done once the source generators' runs the server has queued, as a load changing a project's analyzers queues
     /// one, have run: before then it answers for a project's generated code as its generators made it before. With the
-    /// files its projects' builds write that it holds otherwise than the disk, which it has yet to hear of.</summary>
-    public Task<Roslyn.Extension.GeneratorsRan> GeneratorsRunAsync(CancellationToken cancel = default) =>
-        ExtensionAsync<Roslyn.Extension.GeneratorsRan>(Roslyn.Extension.Handlers.GeneratorsRun, new Roslyn.Extension.GeneratorsAsked(), cancel);
+    /// files its projects' builds write that it holds otherwise than the disk, which it has yet to hear of, but those under
+    /// a folder let go of (<see cref="LetGo"/>): the extension reads none of them, and none is named.</summary>
+    public async Task<Roslyn.Extension.GeneratorsRan> GeneratorsRunAsync(CancellationToken cancel = default)
+    {
+        TaskCompletionSource ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string[] passing;
+        lock (goingGate)
+        {
+            passing = [.. going.SelectMany(folders => folders)];
+            asking.Add(ended.Task);
+        }
+        try
+        {
+            Roslyn.Extension.GeneratorsRan ran = await ExtensionAsync<Roslyn.Extension.GeneratorsRan>(Roslyn.Extension.Handlers.GeneratorsRun,
+                new Roslyn.Extension.GeneratorsAsked(passing), cancel).ConfigureAwait(false);
+            lock (goingGate)
+            {
+                return new Roslyn.Extension.GeneratorsRan([.. ran.Unread.Where(path => !going.Any(folders => folders.Any(folder => PathNames.Within(path, folder))))]);
+            }
+        }
+        finally
+        {
+            lock (goingGate)
+            {
+                asking.Remove(ended.Task);
+            }
+            ended.TrySetResult();
+        }
+    }
+
+    /// <summary>The folders about to go or move, each let-go's own (<see cref="LetGo"/>), and the generators' questions under
+    /// way (<see cref="GeneratorsRunAsync"/>), each done once answered.</summary>
+    private readonly List<IReadOnlyList<string>> going = [];
+    private readonly List<Task> asking = [];
+    private readonly Lock goingGate = new();
+
+    /// <summary>Has the generators' questions read nothing under folders about to go or move until disposed (<c>Held</c>):
+    /// the extension reads each document its projects' builds wrote to answer one, and Windows moves no folder with a file
+    /// under it open. <c>Asked</c> is done once those asked before, which may still read there, are answered, and the loads
+    /// under way reading there have ended (<see cref="loads"/>).</summary>
+    public (IDisposable Held, Task Asked) LetGo(IReadOnlyList<string> folders)
+    {
+        Task[] under;
+        lock (goingGate)
+        {
+            going.Add(folders);
+            under = [.. asking, .. loads.Where(l => folders.Any(l.Reaches)).Select(l => l.Ended.Task)];
+        }
+        return (new LettingGo(this, folders), Task.WhenAll(under));
+    }
+
+    private sealed class LettingGo(RoslynSession session, IReadOnlyList<string> folders) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (session.goingGate)
+            {
+                session.going.Remove(folders);
+            }
+        }
+    }
 
     /// <summary>A message to Passenger's extension about the solution that nothing waits on, as a debugging session ends.</summary>
     public void TellExtension(string handler, object message) => RoslynExtension.TellWorkspace(Server, handler, message);
@@ -503,6 +586,7 @@ public sealed class RoslynSession : IAsyncDisposable, IDocumentHost
     public async ValueTask DisposeAsync()
     {
         ending.Cancel();
+        EndLoads();
         foreach (LspDocument document in documents.Values.ToList())
         {
             document.Dispose();
@@ -979,6 +1063,12 @@ public sealed class LspDocument : IDisposable
     public async Task<IReadOnlyList<LspTextEdit>> FormatAsync(IndentOptions indent, EditorConfig conventions, CancellationToken cancel = default) =>
         await Server.RequestAsync<List<LspTextEdit>>(LspMethods.Formatting,
             new DocumentFormattingParams(Identifier, FormattingOptions.Of(indent, conventions, Text.Snapshot)), cancel) ?? [];
+
+    /// <summary>The whole document formatted as <see cref="FormatAsync(IndentOptions, EditorConfig, CancellationToken)"/>
+    /// formats it; null where the server answers none, as one that lays none of the document out does.</summary>
+    public async Task<IReadOnlyList<LspTextEdit>?> FormattedAsync(IndentOptions indent, EditorConfig conventions, CancellationToken cancel = default) =>
+        await Server.RequestAsync<List<LspTextEdit>?>(LspMethods.Formatting,
+            new DocumentFormattingParams(Identifier, FormattingOptions.Of(indent, conventions, Text.Snapshot)), cancel);
 
     /// <summary>Whether the server formats a range of a document, not only the whole.</summary>
     public bool FormatsRanges => Server.Provides("documentRangeFormattingProvider");

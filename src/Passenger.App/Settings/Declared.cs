@@ -249,8 +249,18 @@ public static class Declared
     public static readonly ToggleSetting ReformatOnSave = new(s => s.ReformatOnSave, (s, v) => s with { ReformatOnSave = v },
         new(D.EditorPage, "Reformat on save", "save actions on save format on save reformat code formatting layout c# xaml",
             "File, Save and Save All reformat each changed file first, as Reformat Code does, as one undoable edit; autosave never "
-            + "does. A file Prettier's Run on save covers is Prettier's alone, and GDScript's own Reformat on save (Code Style: "
-            + "GDScript) turns this on for scripts alone."));
+            + "does. A web file whose folder names Oxfmt or Biome is laid out by it, one Prettier's Run on save covers otherwise by "
+            + "Prettier alone, and GDScript's own Reformat on save (Code Style: GDScript) turns this on for scripts alone."));
+
+    public static readonly ChoiceSetting<CSharpFormatter> CSharpFormatter = new(s => s.CSharpFormatter, (s, v) => s with { CSharpFormatter = v },
+        [(Settings.CSharpFormatter.Passenger, "Passenger's own"), (Settings.CSharpFormatter.DotnetFormat, "dotnet format")],
+        new(D.EditorPage, "C# formatter", "c# formatter dotnet format reformat code cleanup on save layout whitespace style analyzers sdk editorconfig",
+            "What lays C# out for Reformat Code, Code Cleanup and Reformat on save, in the editor and over what the Explorer has chosen. "
+            + "Passenger's own: the C# language server, at once, a selection alone where one is chosen. dotnet format: the folder's .NET SDK "
+            + "runs dotnet format on the file's project or the solution, reading each .editorconfig as the build does, and the editor takes "
+            + "what it wrote, in the file's own line breaks, as one undoable step; Reformat Code fixes whitespace, Code Cleanup also the code "
+            + "style and analyzer findings set to warning or above. It saves the file first, lays out the whole file, and runs only in a "
+            + "trusted folder."));
 
     public static readonly ToggleSetting EnsureFinalLineBreak = new(s => s.EnsureFinalLineBreak, (s, v) => s with { EnsureFinalLineBreak = v },
         new(D.EditorPage, "Ensure a final line break on save", "save actions on save final line break newline end of file eol",
@@ -496,6 +506,13 @@ public static class Declared
             "A page's <link rel=\"stylesheet\"> to an address on the web (a CDN's Bootstrap) has the stylesheet downloaded once, kept in "
             + "Passenger's cache, to complete, describe and check the classes it defines; one whose link gives an integrity hash is "
             + "used only while it matches. The app's own stylesheets and its packages' are read from disk, never downloaded."));
+
+    public static readonly ChoiceSetting<RuntimeChoice> WebRuntime = new(s => s.WebRuntime, (s, v) => s with { WebRuntime = v },
+        [(RuntimeChoice.FromLockfile, "As the folder's lockfile says"), (RuntimeChoice.Node, "Node.js"), (RuntimeChoice.Bun, "Bun"), (RuntimeChoice.Deno, "Deno")],
+        new(D.NodePage, "Runtime", "runtime node nodejs bun deno lockfile bun.lock deno.lock javascript typescript language server eslint prettier",
+            "What the JavaScript, TypeScript, HTML, CSS, JSON, Dockerfile and YAML language servers, ESLint and Prettier run on. "
+            + "As the folder's lockfile says, a folder with a bun.lock (or a packageManager field naming Bun) runs them on Bun, one "
+            + "with a deno.lock on Deno, any other on Node.js. Bun and Deno are the first on the PATH."));
 
     public static readonly ToggleSetting DockerHubTags = new(s => s.DockerHubTags, (s, v) => s with { DockerHubTags = v },
         new(D.DockerPage, "Complete image tags from Docker Hub",

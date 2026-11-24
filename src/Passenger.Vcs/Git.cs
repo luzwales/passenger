@@ -1839,6 +1839,28 @@ public sealed partial class Git
         return UpdatePlan.Of(set.Succeeded ? set.Output : string.Empty, branch);
     }
 
+    /// <summary>The diff, merge and filter drivers git's configuration declares for the repository, each by its kind and
+    /// name (<c>[diff "csharp-own"]</c>); null where git could not say.</summary>
+    public async Task<IReadOnlySet<(string Kind, string Name)>?> DriversAsync()
+    {
+        GitResult set = await RunAsync(Root, ["config", "-z", "--name-only", "--get-regexp", $"^({GitAttributeNames.Diff}|{GitAttributeNames.Merge}|{GitAttributeNames.Filter})\\."], answers: [1]);
+        if (!set.Succeeded && set.Code != 1)
+        {
+            return null;
+        }
+        HashSet<(string, string)> drivers = [];
+        foreach (string key in set.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int first = key.IndexOf('.', StringComparison.Ordinal);
+            int last = key.LastIndexOf('.');
+            if (first > 0 && last > first)
+            {
+                drivers.Add((key[..first], key[(first + 1)..last]));
+            }
+        }
+        return drivers;
+    }
+
     /// <summary>Update Project's second half, once the upstream is fetched: the branch merged with it or rebased onto it as
     /// <paramref name="plan"/> says, its uncommitted changes to tracked files set aside first and put back after
     /// (--autostash); a merge or rebase stopped for conflicts puts them back once it is finished or aborted.</summary>
@@ -1963,13 +1985,54 @@ public sealed partial class Git
         return gone.Length > 0 ? await OnFilesAsync(["rm", "--cached", "-r", "-q", "--ignore-unmatch"], gone) : Done;
     }
 
-    /// <summary>Unstages files whole: the index given back what the last commit has at each, none where it has none.</summary>
-    public async Task<GitResult> UnstageAsync(IReadOnlyList<string> paths)
+    /// <summary>Unstages files whole: the index given back what the last commit has at each, none where it has none; a moved
+    /// file (<paramref name="moves"/>, where it was and is) whose move the index holds keeps it there, its new name holding
+    /// what the last commit has at its old one, as a move in the Explorer leaves the index.</summary>
+    public async Task<GitResult> UnstageAsync(IReadOnlyList<string> paths, IReadOnlyList<(string From, string To)> moves)
     {
         string[] relative = [.. paths.Select(Relative).Distinct()];
-        return relative.Length == 0 ? Done
-            : await HeadAsync() is null ? await OnFilesAsync(["rm", "--cached", "-r", "-q", "--ignore-unmatch"], relative)
-            : await OnFilesAsync(["reset", "-q", "HEAD"], relative);
+        if (await HeadAsync() is null)
+        {
+            string[] every = [.. relative, .. moves.SelectMany(m => new[] { Relative(m.From), Relative(m.To) })];
+            return every.Length == 0 ? Done : await OnFilesAsync(["rm", "--cached", "-r", "-q", "--ignore-unmatch"], [.. every.Distinct()]);
+        }
+        Dictionary<string, (string Mode, string Blob)> committed = moves.Count == 0 ? [] : await HeadFilesAsync();
+        Dictionary<string, (string Mode, string Blob)> held = moves.Count == 0 ? [] : await StageZeroAsync();
+        bool composed = moves.Any(m => !Ascii.IsValid(Relative(m.From)) || !Ascii.IsValid(Relative(m.To))) && await ComposesAsync();
+        StringBuilder kept = new();
+        List<string> reset = [.. relative];
+        foreach ((string from, string to) in moves)
+        {
+            string was = GitForm(Relative(from), composed);
+            string now = GitForm(Relative(to), composed);
+            if (held.ContainsKey(now) && !held.ContainsKey(was) && committed.TryGetValue(was, out (string Mode, string Blob) entry))
+            {
+                kept.Append(System.Globalization.CultureInfo.InvariantCulture, $"{entry.Mode} {entry.Blob}\t{now}\0");
+            }
+            else
+            {
+                reset.AddRange([Relative(from), Relative(to)]);
+            }
+        }
+        GitResult unstaged = reset.Count == 0 ? Done : await OnFilesAsync(["reset", "-q", "HEAD"], [.. reset.Distinct()]);
+        return !unstaged.Succeeded || kept.Length == 0 ? unstaged : await RunAsync(Root, ["update-index", "-z", "--index-info"], kept.ToString());
+    }
+
+    /// <summary>The last commit's files, each by its name as git writes it with its mode and blob; none where git could not
+    /// read them.</summary>
+    private async Task<Dictionary<string, (string Mode, string Blob)>> HeadFilesAsync()
+    {
+        Dictionary<string, (string Mode, string Blob)> files = new(StringComparer.Ordinal);
+        GitResult tree = await RunAsync(Root, ["ls-tree", "-r", "-z", "--full-tree", "--end-of-options", "HEAD"]);
+        foreach (string entry in tree.Succeeded ? tree.Output.Split('\0') : [])
+        {
+            // "<mode> <type> <object>\t<name>": a submodule's commit is no file's blob.
+            if (entry.IndexOf('\t') is > 0 and int tab && entry[..tab].Split(' ') is [{ } mode, "blob", { } blob])
+            {
+                files[entry[(tab + 1)..]] = (mode, blob);
+            }
+        }
+        return files;
     }
 
     /// <summary>Stages some of a file's changes: what the index holds of it takes in <paramref name="chosen"/>'s changes as
@@ -2040,27 +2103,51 @@ public sealed partial class Git
             : await RunAsync(Root, ["update-index", "-z", "--index-info"], $"{entry.Mode} {written.Read!.Trim()}\t{name}\0");
     }
 
-    /// <summary>What the index holds at a file, its mode and blob, or null where it holds none (or it is in conflict), for
-    /// putting it back as it was (<see cref="PutIndexEntryAsync"/>).</summary>
-    public async Task<(string Mode, string Blob)?> IndexEntryAsync(string path) =>
-        await IndexEntryOfAsync(GitForm(Relative(path), !Ascii.IsValid(Relative(path)) && await ComposesAsync()));
-
-    /// <summary>Puts the index's entry at a file as <paramref name="entry"/> has it, taking it out where that is null.</summary>
-    public async Task<GitResult> PutIndexEntryAsync(string path, (string Mode, string Blob)? entry)
+    /// <summary>What the index holds at each file, its mode and blob, or null where it holds none (or it is in conflict), for
+    /// putting them back as they were (<see cref="PutIndexEntriesAsync"/>): one git reads them however many there are.</summary>
+    public async Task<IReadOnlyList<(string Mode, string Blob)?>> IndexEntriesAsync(IReadOnlyList<string> paths)
     {
-        string name = GitForm(Relative(path), !Ascii.IsValid(Relative(path)) && await ComposesAsync());
-        // A mode of zeros takes the entry out.
-        string line = entry is { } put ? $"{put.Mode} {put.Blob}\t{name}\0" : $"0 {new string('0', 40)}\t{name}\0";
-        return await RunAsync(Root, ["update-index", "-z", "--index-info"], line);
+        bool composed = paths.Any(p => !Ascii.IsValid(Relative(p))) && await ComposesAsync();
+        Dictionary<string, (string Mode, string Blob)> held = await StageZeroAsync();
+        return [.. paths.Select(p => held.TryGetValue(GitForm(Relative(p), composed), out (string Mode, string Blob) entry) ? entry : ((string, string)?)null)];
+    }
+
+    /// <summary>Puts the index's entry at each file as its entry has it, taking it out where that is null, by one git.</summary>
+    public async Task<GitResult> PutIndexEntriesAsync(IReadOnlyList<(string Path, (string Mode, string Blob)? Entry)> entries)
+    {
+        bool composed = entries.Any(e => !Ascii.IsValid(Relative(e.Path))) && await ComposesAsync();
+        StringBuilder lines = new();
+        foreach ((string path, (string Mode, string Blob)? entry) in entries)
+        {
+            string name = GitForm(Relative(path), composed);
+            // A mode of zeros takes the entry out.
+            lines.Append(entry is { } put ? $"{put.Mode} {put.Blob}\t{name}\0" : $"0 {new string('0', 40)}\t{name}\0");
+        }
+        return lines.Length == 0 ? Done : await RunAsync(Root, ["update-index", "-z", "--index-info"], lines.ToString());
     }
 
     /// <summary>The index's stage-0 entry at a name as git writes it, or null where it has none.</summary>
-    private async Task<(string Mode, string Blob)?> IndexEntryOfAsync(string name)
+    private async Task<(string Mode, string Blob)?> IndexEntryOfAsync(string name) =>
+        (await StageZeroAsync()).TryGetValue(name, out (string Mode, string Blob) entry) ? entry : null;
+
+    /// <summary>The index's stage-0 entries by their names as git writes them; none where git could not read it.</summary>
+    private async Task<Dictionary<string, (string Mode, string Blob)>> StageZeroAsync()
     {
+        Dictionary<string, (string Mode, string Blob)> held = new(StringComparer.Ordinal);
         GitResult entries = await RunAsync(Root, ["ls-files", "--stage", "-z"]);
-        // "<mode> <blob> <stage>\t<name>"
-        return entries.Succeeded && entries.Output.Split('\0').FirstOrDefault(e => e.IndexOf('\t') is > 0 and int tab && e[(tab + 1)..] == name) is { } entry
-            && entry[..entry.IndexOf('\t')].Split(' ') is [{ } mode, { } blob, "0"] ? (mode, blob) : null;
+        if (!entries.Succeeded)
+        {
+            return held;
+        }
+        foreach (string entry in entries.Output.Split('\0'))
+        {
+            // "<mode> <blob> <stage>\t<name>"
+            if (entry.IndexOf('\t') is > 0 and int tab && entry[..tab].Split(' ') is [{ } mode, { } blob, "0"])
+            {
+                held[entry[(tab + 1)..]] = (mode, blob);
+            }
+        }
+        return held;
     }
 
     /// <summary>Where a commit of whole files failed (a hook refused it, its signing was refused), the index's entries for
@@ -3012,6 +3099,9 @@ public sealed partial class Git
 
     private static GitResult NotInstalled =>
         new(Absent, string.Empty, OperatingSystem.IsMacOS() ? "git is not installed: xcode-select --install installs it" : "git is not installed");
+
+    /// <summary>Why no git can be run here, in the words a call would fail with: it is not installed; null where one is.</summary>
+    public static async Task<string?> MissingAsync() => await Programs.GitAsync() is null ? NotInstalled.Error : null;
 
     /// <summary>What git exits with when what it is asked for is not there (a file at a revision, an upstream, a first
     /// commit, a working tree): the answer no to a question, which the log leaves out.</summary>

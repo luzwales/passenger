@@ -67,7 +67,7 @@ public sealed class CommandLineTests : IDisposable
         await Flow.StepAsync("a caret counted from zero takes zero based and one without it is refused with exit code 2", () => Cases.EachAsync<(string, string)>([("--screenshot out.png --zero-based", "--zero-based says --caret counts its line and column from 0, and no --caret is given"), ("notes.txt --caret 0:0 --screenshot out.png", "--caret takes LINE or LINE:COLUMN from 1, not '0:0'")], row => Flow.StepApartAsync($"a caret counted from zero takes zero based and one without it is refused with exit code 2 ({row})", () => new CommandLineTests(), t => t.A_caret_counted_from_zero_takes_zero_based_and_one_without_it_is_refused_with_exit_code_2(row.Item1, row.Item2))));
         await Flow.StepAsync("Run or debug with no folder before it or in a mode with no window of its own ends Passenger with exit code 2 and the reason", () => Cases.EachAsync<(string, string)>([("--run", "--run starts a run configuration of the folder Passenger opens, and none is given: passenger FOLDER --run [NAME], the folder first"), (". --run --debug", "--run and --debug each start a run configuration; give one of them"), ("--mcp . --run", "--mcp does not take --run; its agent starts a configuration with its run"), ("--mcp-attach . --debug", "--mcp-attach joins a running Passenger's window and takes only its process id and a folder, not --debug")], row => Flow.StepApartAsync($"Run or debug with no folder before it or in a mode with no window of its own ends Passenger with exit code 2 and the reason ({row})", () => new CommandLineTests(), t => t.Run_or_debug_with_no_folder_before_it_or_in_a_mode_with_no_window_of_its_own_ends_Passenger_with_exit_code_2_and_the_reason(row.Item1, row.Item2))));
         await Flow.StepAsync("a malformed variable of the language server's load or of a typing pause ends Passenger with exit code 2 and the reason", () => Cases.EachAsync<(string, string, string)>([(global::Passenger.App.CSharp.CSharpService.SlowLoadVariable, "5m", Milliseconds), (global::Passenger.App.Editors.TypingPauses.Variable, "0", Milliseconds)], row => Flow.StepApartAsync($"a malformed variable of the language server's load or of a typing pause ends Passenger with exit code 2 and the reason ({row})", () => new CommandLineTests(), t => t.A_malformed_variable_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2, row.Item3))));
-        await Flow.StepAsync("a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts", () => Cases.EachAsync<(string, string)>([(global::Passenger.Core.DotnetReleases.Variable, "releases"), (global::Passenger.App.Updates.ReleaseFeed.Variable, "http://192.0.2.10/repos/Zaneris/passenger/releases")], row => Flow.StepApartAsync($"a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts ({row})", () => new CommandLineTests(), t => t.A_variable_naming_no_https_address_for_a_host_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2))));
+        await Flow.StepAsync("a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts", () => Cases.EachAsync<(string, string)>([(global::Passenger.Core.DotnetReleases.Variable, "releases"), (global::Passenger.App.Updates.ReleaseFeed.Variable, "http://192.0.2.10/repos/luzwales/passenger/releases")], row => Flow.StepApartAsync($"a variable naming no https address for a host ends Passenger with exit code 2 and the reason before anything starts ({row})", () => new CommandLineTests(), t => t.A_variable_naming_no_https_address_for_a_host_ends_Passenger_with_exit_code_2_and_the_reason_before_anything_starts(row.Item1, row.Item2))));
     }
 
     /// <summary>A screenshot wears the look named, types a key as the character it makes, opens on the settings kept
@@ -84,13 +84,14 @@ public sealed class CommandLineTests : IDisposable
     }
 
     /// <summary>A start failing before its log is set up leaves why in the log folder and the next start says it once,
-    /// and a relative state folder is named from where Passenger started or ends the start saying why, as one flow,
-    /// each step the check one test made in an instance of its own.</summary>
+    /// a relative state folder is named from where Passenger started or ends the start saying why, and a portable copy's
+    /// is its data folder, as one flow, each step the check one test made in an instance of its own.</summary>
     [AvaloniaFact]
     public async Task A_start_that_fails_says_why_once_and_a_relative_state_folder_is_where_it_started()
     {
         await Flow.StepApartAsync("a start failing before its log is set up leaves why in the log folder and the next start says it once", () => new CommandLineTests(), t => t.A_start_failing_before_its_log_is_set_up_leaves_why_in_the_log_folder_and_the_next_start_says_it_once());
         await Flow.StepApartAsync("a relative state folder is named from where Passenger started and one that cannot be made ends the start saying so", () => new CommandLineTests(), t => t.A_relative_state_folder_is_named_from_where_Passenger_started_and_one_that_cannot_be_made_ends_the_start_saying_so());
+        await Flow.StepApartAsync("a portable copy keeps its state in its data folder and writes nothing outside it but the temporary folder", () => new CommandLineTests(), t => t.A_portable_copy_keeps_its_state_in_its_data_folder_and_writes_nothing_outside_it_but_the_temporary_folder());
     }
 
     private async Task A_malformed_value_or_a_flag_its_mode_does_not_take_ends_Passenger_with_exit_code_2_and_the_reason(string arguments, string reason)
@@ -588,6 +589,104 @@ public sealed class CommandLineTests : IDisposable
             $"A state folder that cannot be made, inside a file, did not end the start saying so: exit code {code}\n{error}");
     }
 
+    /// <summary>A copy with a data folder beside its executable keeps its state there (its log, its folder's documents) and
+    /// writes nothing in the person's own folders: run as a person's window from a fresh folder, its HOME a fresh one of
+    /// its own, that home stays empty, and on Windows, whose folders follow no variable, the local application data's
+    /// Passenger gains nothing. A data folder that is a file ends the start saying why, as a malformed flag does.</summary>
+    private async Task A_portable_copy_keeps_its_state_in_its_data_folder_and_writes_nothing_outside_it_but_the_temporary_folder()
+    {
+        string copy = PortableCopy(Path.Combine(folder, "Passenger"));
+        string program = Path.Combine(copy, Path.GetFileName(Passenger));
+        string data = Directory.CreateDirectory(Path.Combine(copy, ThisCopy.DataName)).FullName;
+        string home = Directory.CreateDirectory(Path.Combine(folder, "home")).FullName;
+        string opened = Directory.CreateDirectory(Path.Combine(folder, "opened")).FullName;
+        string installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Passenger");
+        HashSet<string> before = Entries(installed);
+        Dictionary<string, string> apart = new() { ["HOME"] = home };
+        string[] unset = [StateStore.Variable, XdgFolders.ConfigVariable, XdgFolders.DataVariable, XdgFolders.CacheVariable];
+
+        ProcessStartInfo start = ChildProcesses.Command(program, ["--headless", opened], folder, apart);
+        foreach (string variable in unset)
+        {
+            start.Environment.Remove(variable);
+        }
+        start.RedirectStandardInput = true;
+        start.RedirectStandardOutput = true;
+        start.RedirectStandardError = true;
+        using Process passenger = ChildProcesses.Start(start);
+        List<string> said = [];
+        Task heard = ChildProcesses.Hear(passenger, _ => { }, line =>
+        {
+            lock (said)
+            {
+                said.Add(line);
+            }
+        });
+        string log = Path.Combine(data, "logs", "passenger.log");
+        try
+        {
+            bool opening = await Waiting.UntilAsync(() => File.Exists(log) && Ui.Shared(log).Contains($"Opened {PathNames.Canonical(opened)}", StringComparison.Ordinal),
+                TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(100));
+            Assert.True(opening, $"A portable copy did not open {opened} keeping its log in {log}: {(File.Exists(log) ? Ui.Shared(log) : "there is none")}\n{string.Join('\n', said)}");
+        }
+        finally
+        {
+            passenger.StandardInput.Close();
+            if (!await Waiting.Within(passenger.WaitForExitAsync(TestContext.Current.CancellationToken), TimeSpan.FromMinutes(1), TestContext.Current.CancellationToken))
+            {
+                ChildProcesses.Kill(passenger);
+            }
+            await heard;
+        }
+
+        Assert.True(Directory.EnumerateDirectories(Path.Combine(data, "workspaces")).Any(),
+            $"A portable copy kept no folder's documents in {data}: {string.Join(", ", Directory.EnumerateFileSystemEntries(data))}");
+        string[] written = [.. Directory.EnumerateFileSystemEntries(home, "*", SearchOption.AllDirectories)];
+        Assert.True(written.Length == 0, $"A portable copy wrote in the person's home: {string.Join(", ", written)}");
+        string[] gained = [.. Entries(installed).Except(before)];
+        Assert.True(gained.Length == 0, $"A portable copy wrote in the local application data's state, {installed}: {string.Join(", ", gained)}");
+
+        Directory.Delete(data, recursive: true);
+        File.WriteAllText(data, "not a folder\n");
+        (int code, string error) = await Run([".", "--size", "800x500", "--scale", "1", "--screenshot", "out.png"], settings, unset: [StateStore.Variable], program: program);
+        // The copy says its data by its own real path, where the test's folder may be reached through a link (macOS's /var).
+        string? named = error.StartsWith("passenger: ", StringComparison.Ordinal) && error.IndexOf(" is no folder", StringComparison.Ordinal) is > 0 and int end
+            ? error["passenger: ".Length..end] : null;
+        Assert.True(code == 2 && named is not null && PathNames.SameFile(named, data),
+            $"A data file beside a copy did not end its start saying so, as a malformed flag does: exit code {code}\n{error}");
+    }
+
+    /// <summary>What a start needs of the tests' Passenger copied into <paramref name="copy"/>: the files beside it, the
+    /// folders of its natives for this system, without symbols; none of the servers, debugger or previewers it starts later.</summary>
+    private static string PortableCopy(string copy)
+    {
+        string from = Path.GetDirectoryName(Passenger)!;
+        string system = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+        IEnumerable<string> natives = Directory.Exists(Path.Combine(from, "runtimes"))
+            ? Directory.EnumerateDirectories(Path.Combine(from, "runtimes")).Where(each => Path.GetFileName(each).StartsWith(system, StringComparison.Ordinal))
+            : [];
+        string[] beside = [.. ((string[])["amd64", "arm64", "x86", "bin"]).Select(name => Path.Combine(from, name)).Where(Directory.Exists)];
+        foreach (string file in Directory.EnumerateFiles(from).Concat(beside.Concat(natives).SelectMany(each => Directory.EnumerateFiles(each, "*", SearchOption.AllDirectories))))
+        {
+            if (file.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            string to = Path.Combine(copy, Path.GetRelativePath(from, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            File.Copy(file, to);
+        }
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(Path.Combine(copy, Path.GetFileName(Passenger)), File.GetUnixFileMode(Passenger));
+        }
+        return copy;
+    }
+
+    /// <summary>Every file and folder under a folder, by path; none where it is not there.</summary>
+    private static HashSet<string> Entries(string folder) =>
+        Directory.Exists(folder) ? [.. Directory.EnumerateFileSystemEntries(folder, "*", SearchOption.AllDirectories)] : [];
+
     /// <summary>The folder a process works in, as the system tells it: Linux's /proc link, macOS's lsof.</summary>
     private static async Task<string?> WorkingFolderAsync(int process)
     {
@@ -602,12 +701,13 @@ public sealed class CommandLineTests : IDisposable
 
     private Task<(int Code, string Error)> Run(string arguments) => Run(arguments.Split(' '), settings);
 
-    /// <summary>Passenger run in the test's folder with these arguments and its state in a folder of their own, with these
-    /// variables in its environment over the run's, and those unset taken out of it.</summary>
+    /// <summary>Passenger (or another copy's <paramref name="program"/>) run in the test's folder with these arguments and
+    /// its state in a folder of their own, with these variables in its environment over the run's, and those unset taken
+    /// out of it.</summary>
     private async Task<(int Code, string Error)> Run(IReadOnlyList<string> arguments, string state, IReadOnlyDictionary<string, string>? environment = null,
-        IReadOnlyList<string>? unset = null)
+        IReadOnlyList<string>? unset = null, string? program = null)
     {
-        ProcessStartInfo start = new(Passenger)
+        ProcessStartInfo start = new(program ?? Passenger)
         {
             WorkingDirectory = folder,
             RedirectStandardInput = true,

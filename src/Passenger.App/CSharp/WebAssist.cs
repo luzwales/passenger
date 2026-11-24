@@ -179,11 +179,20 @@ internal sealed partial class WebAssist(AssistContext context, PopupPlacement po
         return true;
     }
 
-    /// <summary>Prettier's "Run on 'Reformat Code' action", for any file it formats, only <paramref name="within"/> when
-    /// given: one its .prettierignore names, or of a type it does not format, goes to its language server.</summary>
+    /// <summary>The folder's formatter for a file: one its configuration names (Oxfmt, Biome) where it lays the file out,
+    /// else Prettier's "Run on 'Reformat Code' action", for any file it formats, only <paramref name="within"/> when given:
+    /// one its .prettierignore names, or of a type it does not format, goes to its language server.</summary>
     public override async Task<CodeActions.Reformatted?> FormatAsync(OpenDocument document, TextRange? within)
     {
-        if (!PrettierReformats(document) || context.Web?.Invoke() is not { } web)
+        if (context.Web?.Invoke() is not { } web)
+        {
+            return null;
+        }
+        if (await FormatWithToolsAsync(web, document, "Reformat Code", within) is { } laid)
+        {
+            return laid;
+        }
+        if (!PrettierReformats(document))
         {
             return null;
         }
@@ -402,21 +411,18 @@ internal sealed partial class WebAssist(AssistContext context, PopupPlacement po
 
     internal static bool IsPackageJson(OpenDocument document) => Path.GetFileName(document.Path).Equals("package.json", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The installed package's package.json, found as Node.js resolves a package: node_modules beside the
-    /// package.json, then in each folder above it of the person's (<see cref="Passenger.Core.FoldersUp"/>).</summary>
+    /// <summary>The installed package's package.json as the project's package manager lays it out (<see cref="Web.ProjectPackages.Installed"/>),
+    /// where it is a file the editor opens: one in a Yarn archive is none.</summary>
     private static string? Installed(string packageJson, string name)
     {
-        foreach (string folder in Path.GetDirectoryName(packageJson) is { } start ? Passenger.Core.FoldersUp.From(start) : [])
+        // A name rooted on a share or a device (as package.json's text may write one) is no package of the project's.
+        if (Path.GetDirectoryName(packageJson) is not { } start || !Passenger.Core.FoundPaths.Askable(Path.Combine(start, "node_modules", name, "package.json")))
         {
-            // A name rooted on a share or a device (as package.json's text may write one) is no package of these folders'.
-            string candidate = Path.Combine(folder, "node_modules", name, "package.json");
-            if (Passenger.Core.FoundPaths.Askable(candidate) && Passenger.Core.FoldersUp.Found(folder, Path.Combine("node_modules", name, "package.json")) is { } found
-                && File.Exists(found))
-            {
-                return Passenger.Core.PathNames.Canonical(found);
-            }
+            return null;
         }
-        return null;
+        return Web.ProjectPackages.Installed(packageJson, name) is { } folder && Path.Combine(folder, "package.json") is { } found && File.Exists(found)
+            ? Passenger.Core.PathNames.Canonical(found)
+            : null;
     }
 
     /// <summary>The script a script's command runs (<c>npm run build</c>) where the offset is on its name; null elsewhere.</summary>

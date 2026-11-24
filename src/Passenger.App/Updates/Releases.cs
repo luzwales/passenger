@@ -14,10 +14,10 @@ public sealed record ReleaseFeed(Uri Listing, TimeSpan Timeout)
     public const string Variable = "PASSENGER_RELEASES";
 
     /// <summary>GitHub's list of the releases, newest first, a page of the newest 30.</summary>
-    public static readonly Uri GitHub = new("https://api.github.com/repos/Zaneris/passenger/releases");
+    public static readonly Uri GitHub = new("https://api.github.com/repos/luzwales/passenger/releases");
 
     /// <summary>The releases page, for a release that names neither its own page nor a download for this system.</summary>
-    public static readonly Uri GitHubReleases = new("https://github.com/Zaneris/passenger/releases");
+    public static readonly Uri GitHubReleases = new("https://github.com/luzwales/passenger/releases");
 
     /// <summary>Long enough for GitHub over a slow line, short enough that a network that swallows the request costs
     /// nothing a person waits on.</summary>
@@ -25,7 +25,7 @@ public sealed record ReleaseFeed(Uri Listing, TimeSpan Timeout)
 
     /// <summary>Where a release's files download from, each under its tag (v0.2.0/SHA256SUMS): GitHub's for GitHub's feed,
     /// else the same path on the feed's own host.</summary>
-    public Uri Downloads => Listing == GitHub ? new Uri("https://github.com/Zaneris/passenger/releases/download/") : new Uri(Listing, "/Zaneris/passenger/releases/download/");
+    public Uri Downloads => Listing == GitHub ? new Uri("https://github.com/luzwales/passenger/releases/download/") : new Uri(Listing, "/luzwales/passenger/releases/download/");
 
     /// <summary>GitHub's, or the one <c>PASSENGER_RELEASES</c> names (<see cref="EnvironmentValues.Address(string, string)"/>).</summary>
     public static ReleaseFeed Default =>
@@ -86,9 +86,15 @@ public static partial class Releases
     private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
     /// <summary>The download the release workflow names for this system and processor ("Passenger-macos-arm64.dmg"), the
-    /// same in every release, or null for one it builds none for. The system's processor, not the process's: x64 Passenger
-    /// under Rosetta or Windows' emulation is offered the native build.</summary>
-    public static string? ThisSystemsAsset()
+    /// same in every release, or null for one it builds none for: a portable copy's, its portable build
+    /// (<see cref="ThisCopy.Data"/>). The system's processor, not the process's: x64 Passenger under Rosetta or Windows'
+    /// emulation is offered the native build.</summary>
+    public static string? ThisSystemsAsset() => ThisSystemsAsset(portable: ThisCopy.Data is not null);
+
+    /// <summary>This system's download, the installed build's (an installer, a disk image, the archive install.sh installs)
+    /// or the <paramref name="portable"/> one, which runs where it is unpacked: Windows' zip of the app's folder, macOS's
+    /// zip of the app, and Linux's archive, which is both.</summary>
+    public static string? ThisSystemsAsset(bool portable)
     {
         string? processor = RuntimeInformation.OSArchitecture switch
         {
@@ -97,8 +103,8 @@ public static partial class Releases
             _ => null,
         };
         return processor is null ? null
-            : OperatingSystem.IsMacOS() ? $"Passenger-macos-{processor}.dmg"
-            : OperatingSystem.IsWindows() ? $"Passenger-windows-{processor}.exe"
+            : OperatingSystem.IsMacOS() ? $"Passenger-macos-{processor}.{(portable ? "zip" : "dmg")}"
+            : OperatingSystem.IsWindows() ? (portable ? $"Passenger-windows-{processor}-portable.zip" : $"Passenger-windows-{processor}.exe")
             : OperatingSystem.IsLinux() ? $"Passenger-linux-{processor}.tar.gz"
             : null;
     }

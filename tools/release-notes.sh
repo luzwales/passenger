@@ -11,7 +11,7 @@ set -eu
 . "$(dirname "$0")/release-common.sh"
 tag=${1:-}
 root=$(checkout_root)
-repository=${GITHUB_REPOSITORY:-Zaneris/passenger}
+repository=${GITHUB_REPOSITORY:-luzwales/passenger}
 
 if [ -n "$tag" ]; then
     git -C "$root" rev-parse -q --verify "refs/tags/$tag" > /dev/null || fail "there is no tag $tag"

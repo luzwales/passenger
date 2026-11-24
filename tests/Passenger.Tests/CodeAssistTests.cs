@@ -125,17 +125,20 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
 
     /// <summary>Reformat Code of a method, on save as one step of Undo or turned off, changes only its own file and
     /// never a letter typed meanwhile; and what a reformat, a completion, a template or a fix writes takes the file's
-    /// line breaks and indents as its .editorconfig says, else as the file's own lines.</summary>
+    /// line breaks and indents as its .editorconfig says, else as the file's own lines; an .editorconfig is read as
+    /// Roslyn's server and the projects' analyzers read it.</summary>
     [AvaloniaFact]
     public void Reformat_and_what_a_completion_or_fix_writes_keep_the_files_indent_and_line_breaks_and_only_their_own_file()
     {
         Flow.StepApart("a reformat started before switching tabs changes only its own file and breaks lines as the file does", () => new CodeAssistTests(project), t => t.A_reformat_started_before_switching_tabs_changes_only_its_own_file_and_breaks_lines_as_the_file_does());
         Flow.StepApart("Reformat Code with a method selected reformats that method alone and leaves the code around it", () => new CodeAssistTests(project), t => t.Reformat_code_with_a_method_selected_reformats_that_method_alone_and_leaves_the_code_around_it());
         Flow.StepApart("Reformat on Save lays a file out before writing it as one step of Undo, and without the server or turned off saves it as typed", () => new CodeAssistTests(project), t => t.Reformat_on_save_lays_a_file_out_before_writing_it_as_one_step_of_undo_and_without_the_server_or_turned_off_saves_it_as_typed());
+        Flow.StepApart("Reformat Code over a folder and Code Cleanup over the project from the Explorer each change every file as one step of Undo", () => new CodeAssistTests(project), t => t.Reformat_code_over_a_folder_and_code_cleanup_over_the_project_from_the_explorer_each_change_every_file_as_one_step_of_undo());
         Flow.StepApart("a letter typed at the start of what a reformat is about to change stays once the reformat lands", () => new CodeAssistTests(project), t => t.A_letter_typed_at_the_start_of_what_a_reformat_is_about_to_change_stays_once_the_reformat_lands());
         Flow.StepApart("what a completion or a fix writes takes the file's line breaks, whichever the server writes", () => new CodeAssistTests(project), t => t.What_a_completion_or_a_fix_writes_takes_the_files_line_breaks_whichever_the_server_writes());
         Flow.StepApart("a tab-indented .editorconfig has Enter, Tab, a template, a completion and a fix indent with tabs", () => new CodeAssistTests(project), t => t.A_tab_indented_editorconfig_has_enter_tab_a_template_a_completion_and_a_fix_indent_with_tabs());
         Flow.StepApart("where no .editorconfig says, completions and reformatting indent as the file's own lines", () => new CodeAssistTests(project), t => t.Where_no_editorconfig_says_completions_and_reformatting_indent_as_the_files_own_lines());
+        Flow.StepApart("an .editorconfig marks what nothing reads, says what a key does and completes Roslyn's options and their values", () => new CodeAssistTests(project), t => t.An_editorconfig_marks_what_nothing_reads_says_what_a_key_does_and_completes_roslyns_options_and_their_values());
     }
 
     /// <summary>Edits keep the language server in step below line breaks only Roslyn counts, between a CRLF's halves
@@ -513,7 +516,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
 
     /// <summary>Parameter Info at a call of several overloads shows each: those the arguments so far no longer fit set back,
     /// the parameter the caret's argument fills strong in each that fits. An argument typed that only one overload takes sets
-    /// the other back, and once it is gone again both fit; an argument not typed yet is no evidence against either.</summary>
+    /// the other back, and once it is gone again both fit; an argument not typed yet is no evidence against either. Arguments
+    /// fit as C# converts them: a constant a smaller number's overload, strings a params span of strings, an interpolated
+    /// string its handler. A call closed inside another hands the card back to the outer call, whose own close ends it.</summary>
     private void Parameter_info_shows_every_overload_setting_back_those_the_arguments_no_longer_fit()
     {
         MainWindow window = project.Open("Kinds.cs");
@@ -554,6 +559,41 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Assert.Equal("        _ = new System.ArgumentNullException(label, );", editor.Document.Snapshot.GetLineText(editor.CaretPosition.Line));
         Ui.Run(window, AppActions.ParameterInfo);
         Ui.WaitFor(() => Overloads().Count(o => o.Fits) == 2, () => $"both two-argument overloads fitting once the argument is gone: {string.Join(" | ", Overloads())}");
+
+        Ui.PlaceAfter(editor, "System.Math.Max(1, 2");
+        Ui.Run(window, AppActions.ParameterInfo);
+        Ui.WaitFor(() => Overloads().Any(o => o.Code.EndsWith("(byte val1, byte val2)", StringComparison.Ordinal)), () => $"Math.Max's overloads: {window.Assist.SignatureText}");
+        Assert.True(Overloads().All(o => o.Fits), $"Two constants set back the overloads of the numbers they convert to: {string.Join(" | ", Overloads().Where(o => !o.Fits))}");
+        Ui.Press(window, "END");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("_ = string.Join(\",\", label, label);");
+        Ui.Press(window, "LEFT");
+        Ui.Press(window, "LEFT");
+        Ui.Run(window, AppActions.ParameterInfo);
+        Ui.WaitFor(() => Overloads().Any(o => o.Code.Contains("ReadOnlySpan<string?>", StringComparison.Ordinal)), () => $"string.Join's overloads: {window.Assist.SignatureText}");
+        Assert.True(Overloads().Any(o => o.Code.Contains("ReadOnlySpan<string?>", StringComparison.Ordinal) && o.Fits),
+            $"Strings set back the overload whose params span of strings takes them: {string.Join(" | ", Overloads())}");
+        Ui.Press(window, "END");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("System.Diagnostics.Debug.Assert(true, $\"{label}\");");
+        Ui.Press(window, "LEFT");
+        Ui.Press(window, "LEFT");
+        Ui.Run(window, AppActions.ParameterInfo);
+        Ui.WaitFor(() => Overloads().Any(o => o.Code.EndsWith("AssertInterpolatedStringHandler message)", StringComparison.Ordinal)), () => $"Debug.Assert's overloads: {window.Assist.SignatureText}");
+        Assert.True(Overloads().Any(o => o.Code.EndsWith("AssertInterpolatedStringHandler message)", StringComparison.Ordinal) && o.Fits),
+            $"An interpolated string set back the overload whose handler takes it: {string.Join(" | ", Overloads())}");
+
+        Ui.Press(window, "END");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("_ = System.Math.Max(");
+        window.KeyTextInput("System.Math.Abs(");
+        window.KeyTextInput("1");
+        Ui.WaitFor(() => Overloads().Any(o => o.Code.Contains(".Abs(", StringComparison.Ordinal)), () => $"Math.Abs's overloads inside Max's call: {window.Assist.SignatureText}");
+        window.KeyTextInput(")");
+        Ui.WaitFor(() => Overloads().Any(o => o.Code.EndsWith("(byte val1, byte val2)", StringComparison.Ordinal)),
+            () => $"Math.Max's overloads again once Abs's call closed inside it, not {window.Assist.SignatureText ?? "no card"}");
+        window.KeyTextInput(")");
+        Ui.WaitFor(() => window.Assist.SignatureCard is null, () => $"the card gone once Max's call closed, not {window.Assist.SignatureText}");
         window.Close();
 
         // The overload the card marks chosen.
@@ -935,8 +975,9 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         "Microsoft.VisualStudio.RpcContracts",
     ];
 
-    /// <summary>Typing after a dot opens completion, filtered as one types, and Enter commits the item chosen, from a
-    /// language server that has none of the Visual Studio assemblies Passenger leaves out.</summary>
+    /// <summary>Typing after a dot opens completion, filtered as one types, its card listing an item's first overloads and
+    /// how many more before its words, and Enter commits the item chosen, from a language server that has none of the
+    /// Visual Studio assemblies Passenger leaves out.</summary>
     private void Typing_after_a_dot_completes_filtered_as_you_type_and_enter_commits_it_without_the_visual_studio_assemblies_passenger_leaves_out()
     {
         string roslyn = Path.Combine(AppContext.BaseDirectory, "roslyn");
@@ -956,6 +997,10 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Assert.True(window.Assist.IsCompletionOpen);
         Assert.Equal("WriteLine", window.Assist.CompletionLabels.FirstOrDefault());
         Ui.WaitFor(() => window.Assist.ItemDocumentation is { Length: > 0 }, "WriteLine's documentation");
+        string card = window.Assist.ItemDocumentation!;
+        int listed = window.Assist.ItemCard!.GetVisualDescendants().OfType<ColouredCode>().Count();
+        Assert.True(listed == 8 && card.Contains(" more overloads", StringComparison.Ordinal) && card.Contains("Writes", StringComparison.Ordinal),
+            $"WriteLine's card lists {listed} overloads, not the first eight and how many more, its words after them out of the editor's room: {card}");
 
         Ui.Press(window, "ENTER");
         Ui.Settle();
@@ -1192,6 +1237,105 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Assert.Equal("Reformatted", window.Status);
         window.Close();
     }
+
+    /// <summary>The Explorer's Code menu: Reformat Code over a folder lays out the file open in its editor and the one not
+    /// open on disk, and Code Cleanup over the project tidies every file of it, each as one command that one Undo in the
+    /// Explorer takes back whole, saying what it changed; with dotnet format as the C# formatter, the folder's open file is
+    /// saved first and takes what dotnet format wrote, one Undo taking all of it back too, the folder's watcher having
+    /// taken it first.</summary>
+    private void Reformat_code_over_a_folder_and_code_cleanup_over_the_project_from_the_explorer_each_change_every_file_as_one_step_of_undo()
+    {
+        string crooked = project.PathOf("Tidy/Crooked.cs");
+        string spaced = project.PathOf("Tidy/Spaced.cs");
+        MainWindow window = project.Open(crooked);
+        List<string> asked = [];
+        window.Confirm = (_, text, _) =>
+        {
+            asked.Add(text);
+            return Task.FromResult(true);
+        };
+        Passenger.App.Workspace.OpenDocument shown = window.EditorArea.Active!;
+        Passenger.App.Explorer.ExplorerNode folder = ExplorerRow(window, project.PathOf("Tidy"), Passenger.App.Explorer.NodeKind.Folder);
+        Ui.ChooseFromRowMenu(window, folder, "Code", "Reformat Code");
+        Ui.WaitFor(() => window.Status?.StartsWith("Reformat Code changed", StringComparison.Ordinal) == true, () => $"the folder's reformat; the status says '{window.Status}'");
+        Assert.Equal("Reformat Code changed 2 of the 2 files of Tidy", window.Status);
+        Assert.True(shown.Text.Snapshot.ToString() == CrookedLaid, $"Reformat Code over Tidy left Crooked.cs, open, as:\n{shown.Text.Snapshot}");
+        Assert.True(File.ReadAllText(spaced) == SpacedLaid, $"Reformat Code over Tidy left Spaced.cs, not open, as:\n{File.ReadAllText(spaced)}");
+
+        Ui.ClickRow(window, ExplorerRow(window, project.PathOf("Tidy"), Passenger.App.Explorer.NodeKind.Folder));
+        Ui.Run(window, EditorActions.Undo);
+        Ui.Settle();
+        Assert.Equal("Undo Reformat Code? It changes Crooked.cs and Spaced.cs.", asked.LastOrDefault());
+        Assert.True(shown.Text.Snapshot.ToString() == Crooked && File.ReadAllText(spaced) == Spaced,
+            $"One Undo in the Explorer left Crooked.cs as:\n{shown.Text.Snapshot}\nand Spaced.cs as:\n{File.ReadAllText(spaced)}");
+
+        string messy = project.PathOf("Messy.cs");
+        string messyBefore = File.ReadAllText(messy);
+        // A folder of a project and no solution shows its files: the project's file stands for it.
+        Passenger.App.Explorer.ExplorerNode sample = ExplorerRow(window, project.PathOf("Sample.csproj"), Passenger.App.Explorer.NodeKind.File);
+        Ui.ChooseFromRowMenu(window, sample, "Code", "Code Cleanup");
+        Ui.WaitFor(() => window.Status?.StartsWith("Code Cleanup changed", StringComparison.Ordinal) == true, () => $"the project's cleanup; the status says '{window.Status}'");
+        string cleaned = File.ReadAllText(messy);
+        Assert.True(cleaned.StartsWith("using System;\nusing System.Collections.Generic;\n", StringComparison.Ordinal) && !cleaned.Contains("System.Text", StringComparison.Ordinal)
+            && cleaned.Contains("\n        return names.Count;\n", StringComparison.Ordinal) && File.ReadAllText(spaced) == SpacedLaid && shown.Text.Snapshot.ToString() == CrookedLaid,
+            $"Code Cleanup over Sample ({window.Status}) left Messy.cs as:\n{cleaned}\nSpaced.cs as:\n{File.ReadAllText(spaced)}\nand Crooked.cs as:\n{shown.Text.Snapshot}");
+        Ui.ClickRow(window, ExplorerRow(window, project.PathOf("Sample.csproj"), Passenger.App.Explorer.NodeKind.File));
+        Ui.Run(window, EditorActions.Undo);
+        Ui.Settle();
+        Assert.StartsWith("Undo Code Cleanup? It changes ", asked.LastOrDefault(), StringComparison.Ordinal);
+        Assert.True(File.ReadAllText(messy) == messyBefore && File.ReadAllText(spaced) == Spaced && shown.Text.Snapshot.ToString() == Crooked,
+            $"One Undo of the project's Code Cleanup left Messy.cs as:\n{File.ReadAllText(messy)}\nSpaced.cs as:\n{File.ReadAllText(spaced)}\nand Crooked.cs as:\n{shown.Text.Snapshot}");
+
+        // dotnet format as the C# formatter: it reads the disk, so the open file is saved first and takes what it wrote.
+        window.ApplySettings(window.Settings with { CSharpFormatter = CSharpFormatter.DotnetFormat });
+        // The folder's watcher takes what dotnet format wrote into the open file before the run hands it back, as it may.
+        Func<IReadOnlyList<string>, bool, CancellationToken, Task<string?>> format = window.Assist.DotnetFormat!;
+        window.Assist.DotnetFormat = async (files, whitespace, cancel) =>
+        {
+            TaskCompletionSource taken = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            void Taken(object? sender, DocumentChangedEventArgs change) => taken.TrySetResult();
+            shown.Text.Changed += Taken;
+            try
+            {
+                string? failed = await format(files, whitespace, cancel);
+                return failed ?? (await Waiting.Within(taken.Task, TimeSpan.FromSeconds(30)) ? null : "the folder's watcher never took what dotnet format wrote into Crooked.cs");
+            }
+            finally
+            {
+                shown.Text.Changed -= Taken;
+            }
+        };
+        Ui.ChooseFromRowMenu(window, ExplorerRow(window, project.PathOf("Tidy"), Passenger.App.Explorer.NodeKind.Folder), "Code", "Reformat Code");
+        Ui.WaitFor(() => window.Status?.StartsWith("Reformat Code ", StringComparison.Ordinal) == true && window.Status != "Reformat Code: finding the files of Tidy…",
+            () => $"the folder's reformat by dotnet format; the status says '{window.Status}'");
+        Assert.Equal("Reformat Code changed 2 of the 2 files of Tidy", window.Status);
+        Assert.True(shown.Text.Snapshot.ToString() == CrookedLaid && !shown.IsModified && File.ReadAllText(crooked) == CrookedLaid && File.ReadAllText(spaced) == SpacedLaid,
+            $"dotnet format over Tidy left Crooked.cs, open, {(shown.IsModified ? "unsaved" : "saved")} as:\n{shown.Text.Snapshot}\non disk:\n{File.ReadAllText(crooked)}\nand Spaced.cs as:\n{File.ReadAllText(spaced)}");
+        Ui.ClickRow(window, ExplorerRow(window, project.PathOf("Tidy"), Passenger.App.Explorer.NodeKind.Folder));
+        Ui.Run(window, EditorActions.Undo);
+        Ui.Settle();
+        Assert.True(shown.Text.Snapshot.ToString() == Crooked && File.ReadAllText(spaced) == Spaced,
+            $"One Undo of dotnet format's run left Crooked.cs as:\n{shown.Text.Snapshot}\nand Spaced.cs as:\n{File.ReadAllText(spaced)}");
+        window.Assist.DotnetFormat = format;
+        shown.Save();
+        window.ApplySettings(window.Settings with { CSharpFormatter = CSharpFormatter.Passenger });
+        window.Close();
+    }
+
+    /// <summary>A row of the Explorer, shown, by its kind and path.</summary>
+    private static Passenger.App.Explorer.ExplorerNode ExplorerRow(MainWindow window, string path, Passenger.App.Explorer.NodeKind kind)
+    {
+        string full = PathNames.Canonical(path);
+        window.ExplorerView.Reveal(full);
+        Ui.Settle();
+        return window.ExplorerView.Tree.Rows.FirstOrDefault(r => r.Kind == kind && r.Path == full)
+            ?? throw new InvalidOperationException($"The Explorer does not show the {kind} {path}: [{string.Join(", ", window.ExplorerView.Tree.Rows.Select(r => $"{r.Kind} {r.Name}"))}]");
+    }
+
+    private const string Crooked = "class Crooked\n{\n    public static int One()\n    {\n          return 1;\n    }\n}\n";
+    private const string CrookedLaid = "class Crooked\n{\n    public static int One()\n    {\n        return 1;\n    }\n}\n";
+    private const string Spaced = "class Spaced\n{\n    public static int Two( )\n    {\n        return   2;\n    }\n}\n";
+    private const string SpacedLaid = "class Spaced\n{\n    public static int Two()\n    {\n        return 2;\n    }\n}\n";
 
     /// <summary>Settings' Reformat on save: File, Save lays the changed file out as Reformat Code does before writing it, and
     /// one Undo takes the layout back; a language server that does not answer in time leaves the file saved as typed,
@@ -1915,6 +2059,39 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
         Ui.WaitFor(() => editor.Document.Snapshot.ToString().Contains("class Foo", StringComparison.Ordinal), "Foo to be generated");
         AssertTabbed(editor, "\t}\n\n\tprivate class Foo\n\t{\n\t}\n}\n", "the nested type");
         window.Close();
+    }
+
+    private void An_editorconfig_marks_what_nothing_reads_says_what_a_key_does_and_completes_roslyns_options_and_their_values()
+    {
+        MainWindow window = project.Open("Keys/.editorconfig");
+        CodeEditor editor = window.EditorArea.CodeEditor;
+        OpenDocument keys = window.EditorArea.Active!;
+        string[] marked = ["ZZ9999 = No analyzer Sample runs reports ZZ9999", "csharp_unread_option = Nothing reads csharp_unread_option: no option of Roslyn's is named so",
+            "sometimes = Roslyn does not read sometimes as csharp_space_after_cast: it takes true or false", "lfx = end_of_line takes lf, crlf or cr, not lfx"];
+        Ui.WaitFor(() => Marked().SequenceEqual(marked), () => $"The .editorconfig's marks are {string.Join("; ", Marked())}");
+
+        editor.Focus();
+        int key = editor.Document.Snapshot.ToString().IndexOf("csharp_style_var_elsewhere", StringComparison.Ordinal) + 1;
+        window.MouseMove(editor.TranslatePoint(editor.PointOf(key) + new Point(1, editor.LineHeight / 2), window)!.Value, Avalonia.Input.RawInputModifiers.None);
+        Ui.WaitFor(() => window.Assist.HoverText is not null, "the key's hover card");
+        string card = window.Assist.HoverText!;
+        Assert.True(card.Contains("var preferences", StringComparison.Ordinal) && card.Contains("Takes true or false", StringComparison.Ordinal)
+            && card.Contains("Default: ", StringComparison.Ordinal), $"The card on csharp_style_var_elsewhere does not say its group, values and default: {card}");
+        window.MouseMove(new Point(1, 1), Avalonia.Input.RawInputModifiers.None);
+
+        Ui.PlaceAfter(editor, "end_of_line = lfx");
+        Ui.Press(window, "ENTER");
+        window.KeyTextInput("csharp_style_var_wh");
+        Ui.Run(window, AppActions.Complete);
+        Ui.WaitFor(() => window.Assist.CompletionLabels.FirstOrDefault() == "csharp_style_var_when_type_is_apparent",
+            () => $"Completion lists {string.Join(", ", window.Assist.CompletionLabels.Take(5))} for csharp_style_var_wh");
+        Ui.Press(window, "ENTER");
+        Ui.WaitFor(() => window.Assist.CompletionLabels.SequenceEqual(["true", "false"]), () => $"The key chosen lists {string.Join(", ", window.Assist.CompletionLabels)} for its value");
+        Ui.Press(window, "ENTER");
+        Assert.EndsWith("\ncsharp_style_var_when_type_is_apparent = true\n", editor.Document.Snapshot.ToString(), StringComparison.Ordinal);
+        window.Close();
+
+        IEnumerable<string> Marked() => keys.Markers.Select(m => $"{keys.Text.Snapshot.GetText(m.Range.Start, m.Range.Length)} = {m.Message}");
     }
 
     private void Where_no_editorconfig_says_completions_and_reformatting_indent_as_the_files_own_lines()
@@ -3227,6 +3404,10 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
             Directory.CreateDirectory(PathOf("Tabs"));
             File.WriteAllText(PathOf("Tabs/.editorconfig"), "[*.cs]\nindent_style = tab\n");
             File.WriteAllText(PathOf("Tabs/Tabbed.cs"), "class Tabbed\n{\n\tpublic int X { get; }\n\n\tstatic void Make()\n\t{\n\t\tint made = 0;\n\t}\n}\n");
+            // Keys: an .editorconfig setting what Roslyn reads, and what nothing reads.
+            Directory.CreateDirectory(PathOf("Keys"));
+            File.WriteAllText(PathOf("Keys/.editorconfig"), "[*.cs]\ncsharp_style_var_elsewhere = true:warning\ndotnet_diagnostic.IDE0008.severity = suggestion\n"
+                + "dotnet_diagnostic.ZZ9999.severity = warning\ncsharp_unread_option = true\ncsharp_space_after_cast = sometimes\nend_of_line = lfx\n");
             Directory.CreateDirectory(PathOf("Detected"));
             File.WriteAllText(PathOf("Detected/TwoSpaces.cs"), "class TwoSpaces\n{\n  public int X { get; }\n\n  static void Make()\n  {\n    int made = 0;\n    if (made > 0)\n    {\n      made--;\n    }\n  }\n}\n");
             File.WriteAllText(PathOf("Detected/Sixes.cs"), Sixes);
@@ -3236,6 +3417,10 @@ public sealed class CodeAssistTests : IClassFixture<CodeAssistTests.Project>
                 + "        list.ForEach(item => total += square(item));\n        List<int> kept = new();\n        total += Count(new());\n"
                 + "        var (first, second) = (total, \"two\");\n        return first + second.Length + kept.Count;\n    }\n\n"
                 + "    private static int Count(List<int> values) => values.Count;\n}\n");
+            // Tidy: laid out from the Explorer, one file open and one not.
+            Directory.CreateDirectory(PathOf("Tidy"));
+            File.WriteAllText(PathOf("Tidy/Crooked.cs"), Crooked);
+            File.WriteAllText(PathOf("Tidy/Spaced.cs"), Spaced);
             File.WriteAllText(PathOf("Messy.cs"), "using System.Text;\nusing System;\nusing System.Collections.Generic;\n\nstatic class Messy\n{\n    public static int Count()\n    {\n          List<string> names = [];\n        Console.WriteLine(names.Count);\n      return names.Count;\n    }\n}\n");
             // Each one test's own, which no other file uses: written by the test, it cost the warm server before and after it.
             File.WriteAllText(PathOf("Pairs.cs"), "class Counter(int start)\n{\n    public int Start => start;\n}\n\nrecord Pair(int Left, int Right)\n{\n"

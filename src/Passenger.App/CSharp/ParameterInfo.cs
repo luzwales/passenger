@@ -18,7 +18,7 @@ internal interface IOwnSignatures
 
 /// <summary>Parameter Info: the card over the caret of the signature of the call it is in, its parameter there's
 /// documentation (else the signature's), shown after an opening bracket or a comma, following the caret moved through the
-/// call, and gone after the closing bracket or once the caret leaves it; a language's own (<see cref="Own"/>) first where
+/// call or out of a call closed inside it, and gone after the closing bracket or once the caret leaves it; a language's own (<see cref="Own"/>) first where
 /// it has one. Where the server says which overloads the arguments so far still fit (C#'s), every overload shows, the
 /// parameter the caret's argument fills strong in each that fits, the rest set back. A screen reader is told the
 /// signature as it shows, then the parameter the caret is at as it moves to another.</summary>
@@ -71,11 +71,11 @@ internal sealed class ParameterInfo
     /// <summary>The card while it shows.</summary>
     public Avalonia.Controls.Border? Card => card.IsVisible ? card : null;
 
-    /// <summary>The card shown after a call's bracket or comma just typed, and gone after its closing bracket or the
-    /// statement's end.</summary>
+    /// <summary>The card shown after a call's bracket or comma just typed, and gone after the statement's end; a closing
+    /// bracket typed while it shows asks again, so it follows to the call the caret is still in, or goes where it is in none.</summary>
     public void AfterTyped(char last)
     {
-        if (last is '(' or ',')
+        if (last is '(' or ',' || (last == ')' && card.IsVisible))
         {
             IdeErrors.Observe(Show());
         }
@@ -188,9 +188,6 @@ internal sealed class ParameterInfo
         }
     }
 
-    /// <summary>The most overloads Parameter Info lists at once, the rest reached by stepping through them.</summary>
-    private const int MostOverloads = 8;
-
     /// <summary>The server's last answer shown, and the overload chosen in it: the server's, or the one stepped to.</summary>
     private SignatureHelp? answer;
     private int chosen = -1;
@@ -216,7 +213,7 @@ internal sealed class ParameterInfo
     }
 
     /// <summary>The card of an answer, <paramref name="overload"/> chosen: of a call of several overloads, every one as a
-    /// row, those the arguments so far still fit with the parameter the caret's fills, at most <see cref="MostOverloads"/>
+    /// row, those the arguments so far still fit with the parameter the caret's fills, at most <see cref="InfoCard.MostOverloads"/>
     /// round the chosen one and how many there are; else the signature alone; then the chosen one's documentation.</summary>
     private void Draw(int overload, Languages.Language? language)
     {
@@ -228,8 +225,8 @@ internal sealed class ParameterInfo
         int count = help.Signatures.Count;
         if (count > 1 && help.Signatures.Any(s => s.Fits is not null))
         {
-            int top = Math.Clamp(overload - (MostOverloads / 2), 0, Math.Max(0, count - MostOverloads));
-            for (int i = top; i < Math.Min(count, top + MostOverloads); i++)
+            int top = Math.Clamp(overload - (InfoCard.MostOverloads / 2), 0, Math.Max(0, count - InfoCard.MostOverloads));
+            for (int i = top; i < Math.Min(count, top + InfoCard.MostOverloads); i++)
             {
                 SignatureInformation each = help.Signatures[i];
                 bool fits = each.Fits != false;

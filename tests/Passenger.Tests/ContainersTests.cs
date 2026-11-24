@@ -1093,7 +1093,7 @@ public sealed class ContainersTests
             File.Copy(Path.Combine(StandInTools("[]"), ContainerTools.Executable), Path.Combine(folder, ContainerTools.Executable));
             File.Copy(typeof(Assert).Assembly.Location, Path.Combine(folder, $"{ContainerTools.Executable}.dll"));
         }
-        ContainerToolsSource source = new([stale], new Passenger.App.Updates.ReleaseFeed(new Uri("http://127.0.0.1:9/repos/Zaneris/passenger/releases"),
+        ContainerToolsSource source = new([stale], new Passenger.App.Updates.ReleaseFeed(new Uri("http://127.0.0.1:9/repos/luzwales/passenger/releases"),
             TimeSpan.FromSeconds(5)), TestFolders.Create("ctr-tools-cache-"));
         string bare = Docker.Container("bare", "sleep 600");
         List<string> made = [bare];

@@ -200,6 +200,7 @@ public partial class MainWindow
         assist.XamlFormat = next.XamlFormat;
         assist.GDScriptFormat = (next.GDScriptFormat, next.GDScriptFormatOnSave);
         assist.ReformatsOnSave = next.ReformatOnSave;
+        assist.CSharpFormatter = next.CSharpFormatter;
         if (terminal is { } panel)
         {
             FollowTerminalSettings(panel, next, before);
@@ -210,7 +211,7 @@ public partial class MainWindow
         }
         ApplyAnalysis();
         godotValues?.On = next.GodotLiveValues;
-        session.Web?.UseNode(next.NodeInterpreter);
+        session.Web?.UseRuntime(next.WebRuntime, next.NodeInterpreter);
         session.Web?.UseTools();
         session.Web?.UseDockerHub(next.DockerHubTags);
         if (next.DownloadStylesheets != before.DownloadStylesheets)

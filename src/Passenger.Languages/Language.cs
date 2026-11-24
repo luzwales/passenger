@@ -148,6 +148,10 @@ public sealed class Language
     /// <summary>Ignore files, a Dockerfile's own (<c>Dockerfile.dockerignore</c>) among them, so before Dockerfile.</summary>
     public static readonly Language Ignore = new("ignore", "Ignore", ["*.dockerignore", "*.gitignore", ".*ignore"], line: "#");
 
+    /// <summary>Git's attributes files, coloured by Passenger's own grammar: a pattern, then its attributes.</summary>
+    public static readonly Language GitAttributes = new("gitattributes", "Git Attributes", [".gitattributes"], line: "#",
+        grammar: new("source.gitattributes", "gitattributes.tmLanguage.json"));
+
     public static readonly Language Dockerfile = new("dockerfile", "Dockerfile",
         ["Dockerfile", "Dockerfile.*", "Containerfile", "Containerfile.*", "*.dockerfile"], line: "#",
         grammar: new("source.dockerfile", "docker.tmLanguage.json"), service: LanguageService.Dockerfile, literals: LiteralLines.Heredocs);
@@ -178,7 +182,7 @@ public sealed class Language
     /// <summary>JSON, told to its server as JSON with comments where the file's reader takes them: the files VS Code reads
     /// so (its json, configuration-editing and typescript-basics extensions' jsonc names, and every JSON file under
     /// .vscode), and .NET's (ASP.NET Core's settings and launch profiles, the SDK's global.json, a solution filter, a solution's
-/// multi-project launch profiles).</summary>
+    /// multi-project launch profiles); and an .http file's private environments of Visual Studio's, JSON as their public file.</summary>
     public static readonly Language Json = new("json", "JSON",
         [.. ((string[])["*.jsonc", "*.eslintrc", "*.eslintrc.json", "*.jsfmtrc", "*.jshintrc", "*.swcrc", "*.hintrc", "*.babelrc", "*.toolset.jsonc",
             "babel.config.json", "bun.lock", ".babelrc.json", ".ember-cli", "typedoc.json", ".github/hooks/*.json",
@@ -186,7 +190,7 @@ public sealed class Language
             "mcp.json", "keybindings.json", "extensions.json", "argv.json", "profiles.json", "devcontainer.json", ".devcontainer.json", ".vscode/*.json",
             "tsconfig*.json", "jsconfig*.json", "appsettings*.json", "launchSettings.json", "global.json", "*.slnf", "*.slnLaunch", "*.slnLaunch.user"])
             .Select(glob => new FilePattern(glob, "jsonc")),
-            "*.json"],
+            "*.json", "http-client.env.json.user"],
         line: "//", block: ("/*", "*/"), indent: 2, grammar: new("source.json", "JSON.tmLanguage.json"), folds: FoldScan.Json, service: LanguageService.Json);
 
     public static readonly Language Yaml = new("yaml", "YAML", ["*.yml", "*.yaml"], line: "#", indent: 2,

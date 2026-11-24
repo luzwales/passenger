@@ -1,6 +1,8 @@
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Passenger.App.Explorer;
+using Passenger.Core;
+using Passenger.Workspace;
 using E = Passenger.Editor.EditorActions;
 using A = Passenger.App.AppActions;
 
@@ -30,6 +32,7 @@ public partial class MainWindow
         // Class, Interface, Record, Struct and Enum share this place, chosen in its popup.
         Row(A.NewType, "Class/Interface…", row => AskType(NewGoesIn(row)!), Holds);
         AddNewItemAction();
+        AddRepositoryFileActions();
         Row(A.NewSolutionFolder, "New Solution Folder…", row => AskName("New Solution Folder", string.Empty, name => AddSolutionFolderAsync(row.SolutionPath, name)),
             row => row.Kind is NodeKind.Solution or NodeKind.SolutionFolder ? null : "A solution folder goes in the solution or one of its folders");
         Row(A.AddExistingProject, "Add Existing Project…", row => IdeErrors.Observe(AddExistingProjectsAsync(row.SolutionPath)),
@@ -248,12 +251,12 @@ public partial class MainWindow
 
     /// <summary>Delete on a row: what is the solution's own (a project, a solution folder, a file it lists) and a
     /// project reference leave it, their files staying on disk; a file or folder goes to the Trash, and so does every one
-    /// chosen with it, asked once, but those inside another.</summary>
+    /// chosen with it, asked once, but those inside another, a file with those nested under it.</summary>
     private async Task DeleteRowAsync(ExplorerNode row)
     {
         if (RowsDeleted(row) is { Count: > 1 } rows)
         {
-            await DeleteAsync(Outermost([.. rows.Where(n => n.IsMovable).Select(n => n.Path).OfType<string>()]));
+            await DeleteWithNestedAsync(Outermost([.. rows.Where(n => n.IsMovable).Select(n => n.Path).OfType<string>()]));
             return;
         }
         switch (row)
@@ -274,8 +277,24 @@ public partial class MainWindow
                 await RemoveProjectAsync(project);
                 break;
             case { Path: { } path }:
-                await DeleteAsync(path);
+                await DeleteWithNestedAsync([path]);
                 break;
+        }
+    }
+
+    /// <summary>Files and folders deleted to the Trash with the files nested under each file among them, as those go
+    /// where it is moved, the one question saying how many go with them.</summary>
+    private async Task DeleteWithNestedAsync(IReadOnlyList<string> paths)
+    {
+        HashSet<string> chosen = new(paths, PathNames.Comparer);
+        string[] nested = [.. DependentsOf(paths).Values.SelectMany(d => d).Where(d => !chosen.Contains(d)).Distinct(PathNames.Comparer)];
+        if (nested.Length == 0)
+        {
+            await DeleteAsync(paths);
+        }
+        else if (await Confirm("Delete", $"{DeleteQuestion(paths).TrimEnd('?')}, with {Plural.Of(nested.Length, "file")} nested under {Plural.Agreeing(paths.Count, "it", "them")}?", "Delete"))
+        {
+            await DeleteAsync([.. paths, .. nested], asked: true);
         }
     }
 
@@ -402,7 +421,8 @@ public partial class MainWindow
                 {
                     add.Add(separator);
                 }
-                add.AddRange([Item(A.NewFile), Item(A.NewFolder), Item(A.NewType), Item(A.NewItem)]);
+                add.AddRange([Item(A.NewFile), Item(A.NewFolder), Item(A.NewType), Item(A.NewItem), separator, Item(A.NewEditorConfig), Item(A.NewGitIgnore),
+                    Item(A.NewGitAttributes)]);
             }
             if (node.Kind == NodeKind.Project && !node.IsShared)
             {
@@ -439,6 +459,11 @@ public partial class MainWindow
         }
         edit.AddRange([Item(A.FindInFiles), Item(A.ReplaceInFiles)]);
         entries.Add(Sub("Edit", edit));
+        // What is chosen laid out, cleaned up or its usings optimized, every file in it as its own command does it.
+        if (holds || solutionFolder || node.IsSolutionItem)
+        {
+            entries.Add(Sub("Code", [Item(A.Reformat), Item(A.CodeCleanup), Item(A.OptimizeUsings)]));
+        }
         // A solution folder is in no folder on disk, so it has no path to copy or show.
         if (!solutionFolder)
         {
@@ -462,7 +487,7 @@ public partial class MainWindow
             && session.Vcs.Repository?.IsInside(versioned) == true)
         {
             List<MenuEntry> git = node.Kind == NodeKind.File ? [Item(A.CompareWithRevision), Item(A.CompareWithBranch)] : [];
-            git.Add(Item(A.ShowHistory));
+            git.AddRange([Item(A.ShowHistory), separator, Item(A.AddToGitIgnore), Item(A.GoToIgnoringLine)]);
             if (!histories)
             {
                 entries.Add(separator);
@@ -483,6 +508,54 @@ public partial class MainWindow
 
         static MenuEntry Item(string action) => new(action);
         static MenuEntry Sub(string title, IReadOnlyList<MenuEntry> entries) => new(null, title, entries);
+    }
+
+    /// <summary>What Reformat Code, Code Cleanup and Optimize Imports run over where the Explorer's menu or keys ask: the rows
+    /// chosen with the one asked of, each file chosen, every file under a folder, each project's own files (a solution folder's
+    /// projects, the solution's every project, a project file's), those a run takes alone (<see cref="CSharp.CodeActions.Takes"/>); null where
+    /// they act on the file shown.</summary>
+    private CSharp.ChosenFiles? ChosenCode(ActionContext context)
+    {
+        if (RowOf(context) is not { } row)
+        {
+            return null;
+        }
+        IReadOnlyList<ExplorerNode> rows = Explorer.SelectedNodes is { Count: > 1 } chosen && chosen.Contains(row) ? chosen : [row];
+        List<string> files = [];
+        List<string> folders = [];
+        List<ProjectModel> projects = [];
+        foreach (ExplorerNode each in rows)
+        {
+            switch (each)
+            {
+                case { Kind: NodeKind.Solution }:
+                    projects.AddRange(session.Projects);
+                    break;
+                case { Kind: NodeKind.Project, Path: { } shared } when each.IsShared:
+                    folders.Add(Path.GetDirectoryName(shared)!);
+                    break;
+                case { Kind: NodeKind.Project or NodeKind.SolutionFolder }:
+                    projects.AddRange(Explorer.Tree.ProjectsOf(each).Select(p => session.Projects.FirstOrDefault(m => PathNames.Same(m.Path, p))).OfType<ProjectModel>());
+                    break;
+                case { Kind: NodeKind.Folder, Path: { } folder }:
+                    folders.Add(folder);
+                    break;
+                // A project's file in the Files view stands for its project.
+                case { Kind: NodeKind.File, Path: { } file } when session.Projects.FirstOrDefault(p => PathNames.Same(p.Path, file)) is { } owner:
+                    projects.Add(owner);
+                    break;
+                case { Kind: NodeKind.File, Path: { } file }:
+                    files.Add(file);
+                    break;
+            }
+        }
+        string of = rows.Count > 1 ? $"of the {Numbers.Said(rows.Count)} chosen" : row.Kind == NodeKind.Solution ? "of the solution" : $"of {row.Name}";
+        return new CSharp.ChosenFiles(of, kind => [.. files.Concat(folders.SelectMany(f => FolderWalk.Files(f, built: true)))
+                .Concat(projects.SelectMany(p => FolderWalk.ProjectFiles(p)))
+                .Select(PathNames.Canonical).Distinct(PathNames.Comparer).Where(f => CSharp.CodeActions.Takes(kind, f)).Order(StringComparer.Ordinal)],
+            kind => files.Count + folders.Count + projects.Count == 0 ? Refusals.NothingToTidy(CSharp.CodeActions.TitleOf(kind), of)
+                : folders.Count + projects.Count == 0 && !files.Any(f => CSharp.CodeActions.Takes(kind, f)) ? Refusals.NothingToTidy(CSharp.CodeActions.TitleOf(kind), of)
+                : null);
     }
 
     /// <summary>The editor's keys the Explorer takes while it has them: Cut, Copy, Paste, Delete, Backspace, Undo and

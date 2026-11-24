@@ -107,19 +107,21 @@ public static class LineDiff
     }
 
     /// <summary>The difference as `git diff` prints it: a header naming the file where it was (<paramref name="from"/>, for
-    /// one renamed) and where it is, then each hunk with three lines of context around it, hunks whose context touches merged
-    /// into one.</summary>
-    public static string Unified(string before, string after, string name, string? from = null, int context = 3)
+    /// one renamed) and where it is, /dev/null on a side with no file (<paramref name="before"/> or <paramref name="after"/>
+    /// null), then each hunk with three lines of context around it, hunks whose context touches merged into one, and a last
+    /// line with no break marked so. With <paramref name="carriageReturns"/>, a CR ending a line is part of it, as git
+    /// compares a file whose breaks it stores as they are, not alike whichever of LF and CRLF ends a line.</summary>
+    public static string Unified(string? before, string? after, string name, string? from = null, int context = 3, bool carriageReturns = false)
     {
-        string[] a = Lines(before);
-        string[] b = Lines(after);
+        string[] a = Compared(before, carriageReturns);
+        string[] b = Compared(after, carriageReturns);
         IReadOnlyList<DiffHunk> hunks = Hunks(a, b);
         if (hunks.Count == 0)
         {
             return string.Empty;
         }
         System.Text.StringBuilder text = new();
-        text.Append($"--- a/{from ?? name}\n+++ b/{name}\n");
+        text.Append($"--- {(before is null ? "/dev/null" : $"a/{from ?? name}")}\n+++ {(after is null ? "/dev/null" : $"b/{name}")}\n");
         int i = 0;
         while (i < hunks.Count)
         {
@@ -133,38 +135,74 @@ public static class LineDiff
             int oldTo = Math.Min(a.Length, hunks[j].OldStart + hunks[j].OldCount + context);
             int newFrom = Math.Max(0, hunks[i].NewStart - context);
             int newTo = Math.Min(b.Length, hunks[j].NewStart + hunks[j].NewCount + context);
-            text.Append($"@@ -{oldFrom + 1},{oldTo - oldFrom} +{newFrom + 1},{newTo - newFrom} @@\n");
+            text.Append($"@@ -{Range(oldFrom, oldTo)} +{Range(newFrom, newTo)} @@\n");
             int at = oldFrom;
             for (int k = i; k <= j; k++)
             {
                 DiffHunk hunk = hunks[k];
                 for (; at < hunk.OldStart; at++)
                 {
-                    text.Append(' ').Append(a[at]).Append('\n');
+                    Line(' ', a[at]);
                 }
                 for (int line = hunk.OldStart; line < hunk.OldStart + hunk.OldCount; line++)
                 {
-                    text.Append('-').Append(a[line]).Append('\n');
+                    Line('-', a[line]);
                 }
                 for (int line = hunk.NewStart; line < hunk.NewStart + hunk.NewCount; line++)
                 {
-                    text.Append('+').Append(b[line]).Append('\n');
+                    Line('+', b[line]);
                 }
                 at = hunk.OldStart + hunk.OldCount;
             }
             for (; at < oldTo; at++)
             {
-                text.Append(' ').Append(a[at]).Append('\n');
+                Line(' ', a[at]);
             }
             i = j + 1;
         }
         return text.ToString();
+
+        // A last line with no break keeps a '\n', which no other line holds, so it differs from one with a break, as in git.
+        static string[] Compared(string? text, bool carriageReturns)
+        {
+            if (carriageReturns)
+            {
+                return [.. WholeLines(text ?? string.Empty).Select(line => line.EndsWith('\n') ? line[..^1] : line + "\n")];
+            }
+            string[] lines = Lines(text ?? string.Empty);
+            if (text is { Length: > 0 } && text[^1] != '\n')
+            {
+                lines[^1] += "\n";
+            }
+            return lines;
+        }
+
+        void Line(char sign, string line)
+        {
+            text.Append(sign);
+            if (line.EndsWith('\n'))
+            {
+                text.Append(line.AsSpan(0, line.Length - 1)).Append("\n\\ No newline at end of file\n");
+            }
+            else
+            {
+                text.Append(line).Append('\n');
+            }
+        }
+
+        // A hunk's lines from 1 as git writes them: one alone without its count, none as the line before them.
+        static string Range(int from, int to) => (to - from) switch
+        {
+            1 => $"{from + 1}",
+            0 => $"{from},0",
+            _ => $"{from + 1},{to - from}",
+        };
     }
 
-    /// <summary>How the lines two texts have alike (those no hunk takes in) changed their separators, in words ("Line
-    /// separators changed: 3 lines from LF to CRLF; LF added at the end"), which a comparison of their lines alone never
-    /// sees; null where none did. With <paramref name="storedAlike"/>, LF and CRLF count as one separator, so only one
-    /// added or removed at the end is said.</summary>
+    /// <summary>How the lines two texts have alike (those no hunk takes in) changed their separators, and whether the texts
+    /// end with one, in words ("Line separators changed: 3 lines from LF to CRLF; LF added at the end"), which a comparison
+    /// of their lines alone never sees; null where none did. With <paramref name="storedAlike"/>, LF and CRLF count as one
+    /// separator, so only one added or removed at the end is said.</summary>
     public static string? SeparatorChanges(string before, string after, bool storedAlike)
     {
         string[] a = Lines(before);
@@ -181,7 +219,8 @@ public static class LineDiff
         void Pair(int line, int other)
         {
             (string from, string to) = (before(line), after(other));
-            if (from == to || (storedAlike && from.Length > 0 && to.Length > 0))
+            // Only a last line ends with none: whether a text ends with one is said apart.
+            if (from == to || from.Length == 0 || to.Length == 0 || storedAlike)
             {
                 return;
             }
@@ -210,17 +249,21 @@ public static class LineDiff
         {
             Pair(i, j);
         }
-        if (changed.Count == 0)
+        List<string> said = [.. changed.Select(c => $"{Plural.Of(c.Lines, "line")} from {c.From} to {c.To}")];
+        // Whether a text ends with a separator is its last line's, whatever lines were added or removed before it.
+        if (beforeLines > 0 && afterLines > 0)
         {
-            return null;
+            switch ((before(beforeLines - 1), after(afterLines - 1)))
+            {
+                case ("", { Length: > 0 } added):
+                    said.Add($"{added} added at the end");
+                    break;
+                case ({ Length: > 0 } removed, ""):
+                    said.Add($"{removed} removed from the end");
+                    break;
+            }
         }
-        // Only a text's last line ends with no separator.
-        return "Line separators changed: " + string.Join("; ", changed.Select(c => (c.From, c.To) switch
-        {
-            ("", _) => $"{c.To} added at the end",
-            (_, "") => $"{c.From} removed from the end",
-            _ => $"{Plural.Of(c.Lines, "line")} from {c.From} to {c.To}",
-        }));
+        return said.Count == 0 ? null : "Line separators changed: " + string.Join("; ", said);
     }
 
     /// <summary>Each of a text's <see cref="Lines"/>' separator, as <see cref="SeparatorChanges(IReadOnlyList{DiffHunk}, int, int, Func{int, string}, Func{int, string}, bool)"/> takes them.</summary>

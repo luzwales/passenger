@@ -87,7 +87,12 @@ public sealed class EndpointsTests : IDisposable
 
     private void Test_sends_the_request_as_written_and_holds_its_answer_to_the_files_criteria()
     {
-        MainWindow window = Open(Folder());
+        string folder = Folder();
+        // $shared fills only what every environment leaves out, and Visual Studio's private file's dev names the host.
+        File.WriteAllText(Path.Combine(folder, "http-client.private.env.json"), """{ "$shared": { "base": "http://shared.invalid" } }""");
+        File.WriteAllText(Path.Combine(folder, "http-client.env.json"), """{ "dev": { "base": "http://public.invalid" } }""");
+        File.WriteAllText(Path.Combine(folder, "http-client.env.json.user"), $$"""{ "dev": { "base": "{{api.Root}}" } }""");
+        MainWindow window = Open(folder);
         window.ShowToolWindow(ToolWindowIds.Endpoints);
         Ui.WaitFor(() => window.Endpoints.Requests.Count == 3, "the requests");
         EndpointRequest all = window.Endpoints.Requests[0];
@@ -108,6 +113,9 @@ public sealed class EndpointsTests : IDisposable
         Ui.WaitFor(() => window.Endpoints.Response.Response is not null, "the second answer");
         Assert.False(window.Endpoints.Response.Passed, "A 404 passed a test that expects an answer below 400");
         Assert.False(window.Endpoints.Outcome(window.Endpoints.Requests[2]));
+        Assert.Null(window.OpenFile(Path.Combine(folder, "http-client.env.json.user")));
+        Assert.True(window.EditorArea.Active!.Language == Passenger.Languages.Language.Json,
+            $"Visual Studio's private environments of an .http file opened as {window.EditorArea.Active.Language.Name}, not as JSON");
         window.Close();
     }
 

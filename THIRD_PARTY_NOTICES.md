@@ -215,7 +215,7 @@ Packages the build or the tests use that no app carries.
 
 | Package | In Passenger | Licence | Copyright |
 |---|---|---|---|
-| `Avalonia.BuildServices` | Avalonia's build task, whose telemetry `AVALONIA_TELEMETRY_OPTOUT` turns off (the README says how) | MIT | Copyright 2023-2025 © The AvaloniaUI Project |
+| `Avalonia.BuildServices` | Avalonia's build task, whose telemetry `AVALONIA_TELEMETRY_OPTOUT` turns off (the README says how) | MIT | Copyright 2023-2026 © The AvaloniaUI Project |
 | `Microsoft.CodeAnalysis.Analyzers` | Roslyn's analyzers, which come with Microsoft.CodeAnalysis.Common | MIT | © Microsoft Corporation. All rights reserved. |
 | `Krafs.Publicizer` | the debugger's build | MIT | © Krafs 2024 |
 | `Microsoft.Build`, `Microsoft.Build.Framework`, `Microsoft.NET.StringTools`, `System.Configuration.ConfigurationManager`, `System.Diagnostics.EventLog`, `System.Reflection.MetadataLoadContext`, `System.Security.Cryptography.ProtectedData` | the project host's build: MSBuild's API and what it depends on, compiled against and never carried, since the host runs the installed SDK's own MSBuild (`src/Passenger.Host`) | MIT | © Microsoft Corporation. All rights reserved. |
@@ -228,6 +228,7 @@ Packages the build or the tests use that no app carries.
 | `Cucumber.HtmlFormatter` | Reqnroll's dependency in the unit tests; Passenger never carries it | MIT | Copyright © Cucumber Ltd |
 | `Avalonia.Fonts.Inter` | Inter 3.019, which `Avalonia.Headless` names and the tests' Avalonia apps take; the app leaves its files out and carries its own Inter (below) | MIT | Copyright 2013-2026 © The AvaloniaUI Project |
 | `Avalonia.Templates` | Avalonia's dotnet new templates, downloaded for the tests' local feed, from which they install them as New Solution does (`AvaloniaApp.Feed`); Passenger never carries them, and installs them only when asked. The package names no licence; its repository's (AvaloniaUI/Avalonia.Templates) is MIT | MIT | Copyright (c) 2023 .NET Foundation and Contributors All Rights Reserved |
+| `Avalonia.Themes.Fluent2` | the Fluent 2 theme Avalonia's templates give an app they make, restored for the tests' package cache (tests/AvaloniaGraphs); Passenger never carries it | MIT | Copyright 2013-2026 © The AvaloniaUI Project |
 | `CommunityToolkit.Mvvm` | the MVVM Toolkit at the version Avalonia's MVVM template writes, downloaded for the tests' package cache, which an app of theirs restores with its generators; Passenger never carries it | MIT | (c) .NET Foundation and Contributors. All rights reserved. |
 | `ReactiveUI`, `ReactiveUI.Core`, `Splat`, `Splat.Builder`, `Splat.Core`, `Splat.Logging` | ReactiveUI and what it depends on, whose view models the XAML tests' Avalonia apps bind to: restored for the tests' package cache (tests/AvaloniaGraphs); Passenger never carries them | MIT | Copyright (c) .NET Foundation and Contributors |
 | `ReactiveUI.SourceGenerators`, `ReactiveUI.Binding` | ReactiveUI's source generators, which make the `[Reactive]` properties and `[ReactiveCommand]` commands those apps bind to, and its bindings: restored for the tests' package cache (tests/AvaloniaGraphs); Passenger never carries them | MIT | Copyright (c) 2026 ReactiveUI and Contributors |
@@ -283,13 +284,15 @@ Packages the build or the tests use that no app carries.
 | `Microsoft.Bcl.AsyncInterfaces`, `Microsoft.Win32.Registry` | the test platform's | MIT | © Microsoft Corporation. All rights reserved. |
 | `vpk` | Velopack's packer, a .NET tool at the version `dotnet-tools.json` pins, which builds the Windows installer (`tools/package-win.sh`). It carries others' programs under their own terms for what Passenger's installer does not use or carry: Microsoft's signtool and Azure Artifact Signing client, which sign it only when signing is asked for (the Windows SDK's and Microsoft's terms), WiX (MS-RL) for MSI packages, and zstd (BSD-3-Clause or GPL-2.0) | MIT | Copyright © Velopack Ltd. All rights reserved. |
 
-### The tests' own ESLint, Prettier and xterm.js
+### The tests' own ESLint, Prettier, Oxlint, Oxfmt, Biome, Yarn and xterm.js
 
-The npm packages `EslintPrettierTests` put in a test folder's node_modules as a project's own ESLint and Prettier, and
-the terminal `TerminalEmulationTests` holds Passenger's terminal to:
+The npm packages `EslintPrettierTests` put in a test folder's node_modules as a project's own ESLint, Prettier, Oxlint,
+Oxfmt and Biome, the Yarn it lays a Plug'n'Play project out with, and the terminal `TerminalEmulationTests` holds
+Passenger's terminal to:
 `tests/Passenger.Tests/NodePackages/package.json` pins them and `package-lock.json` everything they bring, each with
 its tarball's sha512, which the tests' build checks as `tools/Passenger.NodePackages` puts them in the tests' output
-(`node-packages/`). No app carries them, and no test fetches them from npm. Each is named by its npm name, with the
+(`node-packages/`), of a package for some systems only the one for the system it builds on. No app carries them, and no
+test fetches them from npm. Each is named by its npm name, with the
 licence its package.json states and the copyright line its licence file (else its source) carries, else its author.
 `tools/check-notices.py` fails naming any package the lock file pins that is not named here.
 
@@ -298,6 +301,12 @@ licence its package.json states and the copyright line its licence file (else it
 | `eslint` | the project's own ESLint, which Passenger's ESLint support runs through the ESLint language server | MIT | Copyright OpenJS Foundation and other contributors, <www.openjsf.org> |
 | `@xterm/headless` | xterm.js with no screen, the terminal Passenger's own is compared with, output for output | MIT | Copyright (c) 2014-2020 The xterm.js authors; Copyright (c) 2012-2013, Christopher Jeffrey; Copyright (c) 2011 Fabrice Bellard (as its source carries them; it has no licence file) |
 | `prettier`, `prettier2` (Prettier 2.8.8, under npm's alias) | the project's own Prettier, 3 and 2, which Passenger's Prettier runner formats with | MIT | Copyright © James Long and contributors |
+| `@yarnpkg/cli-dist` | Yarn, which lays a test's Plug'n'Play project out offline, its packages the tests' own; its one bundled file carries the code of the packages it is built from under their own notices | BSD-2-Clause | no licence file or copyright line of its own; its repository's (yarnpkg/berry) licence: Copyright (c) 2016-present, Yarn Contributors |
+| `oxlint`, `oxfmt` | the project's own Oxlint and Oxfmt, whose language servers Passenger runs | MIT | Copyright (c) 2024-present VoidZero Inc. & Contributors; Copyright (c) 2023 Boshen |
+| `@oxlint/binding-android-arm-eabi`, `@oxlint/binding-android-arm64`, `@oxlint/binding-darwin-arm64`, `@oxlint/binding-darwin-x64`, `@oxlint/binding-freebsd-x64`, `@oxlint/binding-linux-arm-gnueabihf`, `@oxlint/binding-linux-arm-musleabihf`, `@oxlint/binding-linux-arm64-gnu`, `@oxlint/binding-linux-arm64-musl`, `@oxlint/binding-linux-ppc64-gnu`, `@oxlint/binding-linux-riscv64-gnu`, `@oxlint/binding-linux-riscv64-musl`, `@oxlint/binding-linux-s390x-gnu`, `@oxlint/binding-linux-x64-gnu`, `@oxlint/binding-linux-x64-musl`, `@oxlint/binding-openharmony-arm64`, `@oxlint/binding-win32-arm64-msvc`, `@oxlint/binding-win32-ia32-msvc`, `@oxlint/binding-win32-x64-msvc`, `@oxfmt/binding-android-arm-eabi`, `@oxfmt/binding-android-arm64`, `@oxfmt/binding-darwin-arm64`, `@oxfmt/binding-darwin-x64`, `@oxfmt/binding-freebsd-x64`, `@oxfmt/binding-linux-arm-gnueabihf`, `@oxfmt/binding-linux-arm-musleabihf`, `@oxfmt/binding-linux-arm64-gnu`, `@oxfmt/binding-linux-arm64-musl`, `@oxfmt/binding-linux-ppc64-gnu`, `@oxfmt/binding-linux-riscv64-gnu`, `@oxfmt/binding-linux-riscv64-musl`, `@oxfmt/binding-linux-s390x-gnu`, `@oxfmt/binding-linux-x64-gnu`, `@oxfmt/binding-linux-x64-musl`, `@oxfmt/binding-openharmony-arm64`, `@oxfmt/binding-win32-arm64-msvc`, `@oxfmt/binding-win32-ia32-msvc`, `@oxfmt/binding-win32-x64-msvc` | Oxlint's and Oxfmt's native code, each for one system | MIT | no licence file; its author: Boshen and oxc contributors |
+| `tinypool` | Oxfmt's | MIT | Copyright (c) 2020 James M Snell and the Piscina contributors |
+| `@biomejs/biome` | the project's own Biome, whose language server Passenger runs | MIT OR Apache-2.0 | Copyright (c) 2023 Biome Developers and Contributors. |
+| `@biomejs/cli-android-arm64`, `@biomejs/cli-android-x64`, `@biomejs/cli-darwin-arm64`, `@biomejs/cli-darwin-x64`, `@biomejs/cli-linux-arm64`, `@biomejs/cli-linux-arm64-musl`, `@biomejs/cli-linux-x64`, `@biomejs/cli-linux-x64-musl`, `@biomejs/cli-win32-arm64`, `@biomejs/cli-win32-x64` | Biome's program, each for one system | MIT OR Apache-2.0 | no licence file or author; its repository is biomejs/biome, as `@biomejs/biome`'s |
 | `@eslint/config-array`, `@eslint/core`, `@eslint/object-schema`, `@eslint/plugin-kit`, `@humanfs/core`, `@humanfs/node`, `@humanfs/types` | eslint's configuration, rules and file system | Apache-2.0 | no copyright line; its author: Nicholas C. Zakas |
 | `@eslint/config-helpers` | eslint's configuration | Apache-2.0 | no copyright line or author; its repository is eslint/rewrite |
 | `@humanwhocodes/module-importer`, `@humanwhocodes/retry` | eslint's | Apache-2.0 | no copyright line; its author: Nicholas C. Zaks (as it is written) |
@@ -1098,6 +1107,8 @@ And three that colour Godot's files, from the Godot Engine's own VS Code extensi
 tag 2.7.1 (commit 7317ea20), its `syntaxes/` folder, unchanged: `GDScript.tmLanguage.json` (GDScript's .gd files),
 `GDResource.tmLanguage.json` (scenes, resources and project.godot, which embeds the other two) and
 `GDShader.tmLanguage.json` (Godot's shaders).
+
+`gitattributes.tmLanguage.json`, which colours .gitattributes files, is Passenger's own, under Passenger's licence.
 
 Reading them, Passenger leaves out what VS Code's reader passes over (a capture that is not a rule) and lets a rule
 that begins with no end never end, as VS Code does, takes YAML's typed scalars (booleans, numbers, null) out of a block

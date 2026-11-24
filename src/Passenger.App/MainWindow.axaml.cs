@@ -307,6 +307,11 @@ public partial class MainWindow : IdeWindow
         assist.FollowKeys = () => actions?.ShortcutsShown(AppActions.GoToDeclaration);
         assist.Play += (_, file) => IdeErrors.Observe(PlaySoundAsync(file));
         assist.FilesChanging = FollowingAsync;
+        assist.Chosen = ChosenCode;
+        // The wait an agent's run over a project takes, so the window's over the Explorer's choice is the same.
+        assist.WholeCode = cancel => new Mcp.PassengerTools(this).WholeCodeAsync(cancel);
+        assist.History = () => session.LocalHistory;
+        assist.DotnetFormat = DotnetFormatAsync;
         assist.KeepsPlaces = () => settings.FindResultsIn() == FindResults.FindWindow;
         assist.HttpRouteTargets = HttpRouteTargets;
         assist.RouteCallers = RouteCallers;
@@ -357,6 +362,8 @@ public partial class MainWindow : IdeWindow
         // The session as each call finds it.
         assist.ConfiguredCodeOf = path => session.ConfiguredCodeOf(path);
         assist.ConfiguredBy = path => session.ConfiguredBy(path);
+        assist.IndexedFiles = () => session.Folder is { } folder ? (folder, session.Index.Files) : null;
+        assist.Repository = () => session.Vcs.Repository;
         assist.AddActions(actions!);
         usages.AddActions(actions!);
         DebugController.AddActions(actions!, () => session.Debug);

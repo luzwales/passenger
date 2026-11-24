@@ -151,13 +151,14 @@ public sealed class SoundCuesTests : IDisposable
 
     /// <summary>Each shell here, set up to mark its commands: a command that fails plays its cue once (where the shell tells a
     /// command ran: not bash before 4.4, nor cmd), one that passes and an empty line none, and Read as Text reads the last
-    /// command and its output from its prompt's mark.</summary>
+    /// command and its output from its prompt's mark. zsh's and bash's startup files of the test's own turn nounset on, which
+    /// Passenger's hooks then run under.</summary>
     private void A_command_failing_in_a_shell_plays_its_cue_once_and_Read_as_Text_reads_the_last_command_by_its_marks(string kind)
     {
         (string? program, string[] arguments) = kind switch
         {
             "zsh" => (Found("/bin/zsh", "zsh"), []),
-            "bash" => (Found("/bin/bash", "bash"), ["--norc", "--noprofile"]),
+            "bash" => (Found("/bin/bash", "bash"), ["--noprofile", "--rcfile", BashStartup()]),
             "fish" => (Programs.OnPath("fish"), ["--no-config"]),
             "pwsh" => (Programs.OnPath(OperatingSystem.IsWindows() ? "pwsh.exe" : "pwsh"), ["-NoLogo", "-NoProfile"]),
             "powershell" => (OperatingSystem.IsWindows() ? Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe") : null, ["-NoLogo", "-NoProfile"]),
@@ -165,7 +166,7 @@ public sealed class SoundCuesTests : IDisposable
         };
         Assert.SkipWhen(program is null || !File.Exists(program), $"{kind} is not installed here");
         List<string>? answered = kind == "pwsh" && !OperatingSystem.IsWindows() ? [] : null;
-        (MainWindow window, TerminalSession shell) = TerminalTests.Open(folder, program!, arguments, answered);
+        (MainWindow window, TerminalSession shell) = kind == "zsh" ? OpenOwnZsh() : TerminalTests.Open(folder, program!, arguments, answered);
         try
         {
             window.ApplySettings(window.Settings with { SoundCues = SoundCuesPlayed.Always });
@@ -181,6 +182,18 @@ public sealed class SoundCuesTests : IDisposable
             Run(window, shell, "echo first", answered);
             Run(window, shell, OperatingSystem.IsWindows() ? "cmd /c exit 3" : "false", answered);
             Assert.True(Failed(window) == (tells ? 1 : 0), $"A command failing in {kind} played its cue {Failed(window)} times, not {(tells ? "once" : "never, as it tells no run")}");
+            if (kind == "bash")
+            {
+                Run(window, shell, "echo \"saw $__seen\"; bash --norc --noprofile -i </dev/null", answered);
+                string[] said = ScreenLines(shell);
+                Assert.True(said.Contains("saw 1") && !said.Any(l => l.Contains("not found", StringComparison.Ordinal) || l.Contains("syntax error", StringComparison.Ordinal)),
+                    $"A startup file's PROMPT_COMMAND added after a separator of its own did not run reading the failure's status, or a bash started in the terminal could not run what it inherited:\n{string.Join('\n', said)}");
+            }
+            if (kind is "zsh" or "bash")
+            {
+                string[] stopped = [.. ScreenLines(shell).Where(l => l.Contains("__passenger", StringComparison.Ordinal) || l.Contains(".zshenv:", StringComparison.Ordinal) || l.Contains("unbound variable", StringComparison.Ordinal))];
+                Assert.True(stopped.Length == 0, $"Passenger's {kind} hooks stopped under nounset, which the startup files turned on, losing what follows them:\n{string.Join('\n', stopped)}");
+            }
             Run(window, shell, string.Empty, answered);
             Run(window, shell, "echo second", answered);
             Assert.True(Failed(window) == (tells ? 1 : 0), $"An empty line and a command passing in {kind} played the failure's cue again");
@@ -197,6 +210,31 @@ public sealed class SoundCuesTests : IDisposable
         }
 
         static string? Found(string at, string name) => File.Exists(at) ? at : Programs.OnPath(name);
+
+        // A person's own PROMPT_COMMAND, added after a separator of its own as startup files add one, reading the status.
+        string BashStartup()
+        {
+            string file = Path.Combine(folder, "bashrc");
+            File.WriteAllText(file, "set -u\nPROMPT_COMMAND=\"${PROMPT_COMMAND:+$PROMPT_COMMAND; }__seen=\\$?\"\n");
+            return file;
+        }
+
+        // zsh whose ZDOTDIR's .zshenv turns nounset on before Passenger's hooks, the run's ZDOTDIR given back once it started.
+        (MainWindow, TerminalSession) OpenOwnZsh()
+        {
+            string own = Directory.CreateDirectory(Path.Combine(folder, "zsh")).FullName;
+            File.WriteAllText(Path.Combine(own, ".zshenv"), "setopt nounset\n");
+            string? run = Environment.GetEnvironmentVariable("ZDOTDIR");
+            OwnEnvironment.Set("ZDOTDIR", own);
+            try
+            {
+                return TerminalTests.Open(folder, program!, arguments, answered);
+            }
+            finally
+            {
+                OwnEnvironment.Set("ZDOTDIR", run);
+            }
+        }
     }
 
     /// <summary>Types a command (or nothing) and presses Enter, then waits for the shell's next prompt, marked below the last,

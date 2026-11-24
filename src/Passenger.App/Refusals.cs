@@ -44,7 +44,7 @@ public static class Refusals
 
     /// <summary>What trusting a folder lets Passenger run, as the trust question and the banner say it.</summary>
     public const string TrustLets = "Trusted, Passenger runs its code as it works: design-time builds and restore as it opens, the analyzers and "
-        + "source generators its projects name, builds, runs, tests and debugging, its own TypeScript, ESLint and Prettier, and the programs its "
+        + "source generators its projects name, builds, runs, tests and debugging, its own TypeScript, ESLint, Prettier, Oxlint, Oxfmt and Biome, and the programs its "
         + "Git configuration names.";
 
     /// <summary>What the banner over an untrusted folder says.</summary>
@@ -493,6 +493,10 @@ public static class Refusals
     /// outlines, and none has it open.</summary>
     public static string NoOutline(string file) => $"{file} has no outline: no language server has it open";
 
+    /// <summary>Why Jump to Navigation Bar opens nothing in a file shown: its outline is read, and holds no declaration,
+    /// heading or key.</summary>
+    public static string DeclaresNothing(string file) => $"{file} declares nothing to go to";
+
     /// <summary>Why Context Help has nothing to name in a file shown: neither C#'s server nor GDScript's has it, and it is no shader.</summary>
     public static string NoContextHelp(string file) => $"{file} has no context help: Context Help opens Godot's reference from C#, GDScript and shaders";
 
@@ -782,6 +786,22 @@ public static class Refusals
     /// (<see cref="Passenger.Workspace.GodotHolds"/>), which only the person may choose to.</summary>
     public static string HeldInGodot(string held) => $"{held}, which only the person may choose to write over: save it in Godot first";
 
+    /// <summary>A run of Reformat Code, Code Cleanup or Optimize Imports (<paramref name="what"/>) over what the Explorer has
+    /// chosen (<paramref name="of"/>, "of src/App") that holds no file it lays out.</summary>
+    public static string NothingToTidy(string what, string of) => $"{what} found no file it lays out {of}";
+
+    /// <summary>A C# file Settings' C# formatter would have dotnet format lay out that is in none of the folder's projects (or
+    /// is a file-based program), which dotnet format opens no workspace for.</summary>
+    public static string DotnetFormatsProjects(string name) => $"dotnet format lays out a project's files, and {name} is in none of the folder's projects";
+
+    /// <summary>dotnet format, which Settings' C# formatter chose, ended with an exit code other than 0, saying why.</summary>
+    public static string DotnetFormatFailed(int exit, string said) =>
+        $"dotnet format failed (exit code {exit}){(said.Length > 0 ? $": {said}" : string.Empty)}";
+
+    /// <summary>A file of generated code as Roslyn tells it (<see cref="CSharp.GeneratedCode.GeneratedAmongAsync"/>), which a
+    /// run over many files leaves as what generates it writes it.</summary>
+    public static string GeneratedLeft(string file) => $"{file} is generated code: what generates it writes it again, so it was left as it is";
+
     /// <summary>A source generator's code copied to read (<see cref="CSharp.GeneratedCode"/>), which the C# language server
     /// holds no file of, with what made it and for which project where known (<see cref="CSharp.GeneratedCode.OriginOf"/>).</summary>
     public static string Generated(string name, string? origin = null) =>
@@ -991,6 +1011,9 @@ public static class Refusals
 
     /// <summary>Add to .gitignore on a file Git tracks, where only an unversioned one is ignored.</summary>
     public const string Tracked = "Git tracks this file: only an unversioned file is added to .gitignore";
+
+    /// <summary>Add to .gitignore on what the Commit window does not list as unversioned: tracked, or ignored already.</summary>
+    public const string NotUnversioned = "Git tracks it or ignores it already: only an unversioned file or folder is added to .gitignore";
 
     /// <summary>Compare with Local on a file the commit deleted.</summary>
     public const string DeletedByCommit = "The commit deleted this file, so it holds none to compare";

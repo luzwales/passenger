@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Passenger.App.Settings;
 using Passenger.Core;
 using Passenger.Text;
+using Passenger.Workspace;
 
 namespace Passenger.App.Web;
 
@@ -14,8 +15,8 @@ public sealed record PrettierAnswer(string? Formatted = null, int Cursor = 0, bo
 
 /// <summary>Prettier for the folder open: the project's own prettier package (found from each file's folder up, or the
 /// one Settings names) with its .prettierrc, .editorconfig and nearest .prettierignore. With no language server,
-/// Passenger's runner (<c>web/passenger/prettier.cjs</c>) runs its API on the web servers' Node.js through
-/// ChildProcesses, one process kept warm for the folder, since the first format waits for Node.js to start and Prettier
+/// Passenger's runner (<c>web/passenger/prettier.cjs</c>) runs its API on the web servers' runtime through ChildProcesses,
+/// with a Yarn Plug'n'Play project's .pnp.cjs where it has one, one process kept warm for the folder, since the first format waits for Node.js to start and Prettier
 /// to load. Formats are asked one at a time, from any thread.</summary>
 public sealed class PrettierService : IAsyncDisposable
 {
@@ -76,6 +77,48 @@ public sealed class PrettierService : IAsyncDisposable
     /// <summary>Whether a save formats the file with Prettier first ("Run on save").</summary>
     public bool OnSave(string path) => settings().PrettierOnSave && Covers(path) && PackageFor(path) is not null;
 
+    /// <summary>Prettier's configuration files, as Prettier looks for them from a file's folder up.</summary>
+    private static readonly string[] Configurations =
+    [
+        ".prettierrc", ".prettierrc.json", ".prettierrc.yaml", ".prettierrc.yml", ".prettierrc.json5", ".prettierrc.js", ".prettierrc.mjs",
+        ".prettierrc.cjs", ".prettierrc.ts", ".prettierrc.mts", ".prettierrc.cts", ".prettierrc.toml",
+        "prettier.config.js", "prettier.config.mjs", "prettier.config.cjs", "prettier.config.ts", "prettier.config.mts", "prettier.config.cts",
+    ];
+
+    /// <summary>Whether the folder names Prettier for a file, rather than having it installed alone: a Prettier configuration
+    /// from the file's folder up, or a package.json there that lists prettier or configures it (its <c>prettier</c> key),
+    /// in the person's folders (<see cref="FoldersUp"/>).</summary>
+    public static bool NamedFor(string path)
+    {
+        foreach (string at in Path.GetDirectoryName(path) is { } start ? FoldersUp.From(start) : [])
+        {
+            if (Configurations.Any(name => FoldersUp.Found(at, name) is { } found && File.Exists(found)))
+            {
+                return true;
+            }
+            if (FoldersUp.Found(at, "package.json") is { } manifest && File.Exists(manifest) && (ProjectPackages.Names(manifest, "prettier") || Configures(manifest)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Whether a package.json holds a Prettier configuration of its own.</summary>
+    private static bool Configures(string manifest)
+    {
+        try
+        {
+            using JsonDocument read = JsonDocument.Parse(File.ReadAllText(manifest), LenientJson.Document);
+            return JsonMembers.Value(read.RootElement, "prettier") is not null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // One being edited may not read yet: it configures nothing until it does.
+            return false;
+        }
+    }
+
     /// <summary>The nearest .prettierignore from the file's folder up, in the person's folders (<see cref="FoldersUp"/>),
     /// for when Settings names none.</summary>
     public static string? IgnoreFile(string path)
@@ -116,7 +159,7 @@ public sealed class PrettierService : IAsyncDisposable
             {
                 return new PrettierAnswer(Error: "the folder was closed");
             }
-            if (runner is { } stale && (stale.HasExited || stale.Node != runtime.Path))
+            if (runner is { } stale && (stale.HasExited || stale.Node != runtime))
             {
                 End(stale);
             }
@@ -124,7 +167,7 @@ public sealed class PrettierService : IAsyncDisposable
             Runner running;
             try
             {
-                running = runner ??= await Runner.StartAsync(runtime.Path!, folder).ConfigureAwait(false);
+                running = runner ??= await Runner.StartAsync(runtime, folder).ConfigureAwait(false);
             }
             catch (Exception error) when (ChildFailures.Of(error))
             {
@@ -183,7 +226,7 @@ public sealed class PrettierService : IAsyncDisposable
             if (!running.Timed)
             {
                 running.Timed = true;
-                IdeErrors.Write($"Prettier {answer.Version} formatted {Path.GetFileName(path)} for {folder} in {Durations.Said(Stopwatch.GetElapsedTime(began))}, its runner started on Node.js {runtime.Version}");
+                IdeErrors.Write($"Prettier {answer.Version} formatted {Path.GetFileName(path)} for {folder} in {Durations.Said(Stopwatch.GetElapsedTime(began))}, its runner started on {runtime.Name} {runtime.Version}");
             }
             return answer;
         }
@@ -223,7 +266,7 @@ public sealed class PrettierService : IAsyncDisposable
         }
     }
 
-    /// <summary>Ends the runner (another Node.js chosen); the next format starts one.</summary>
+    /// <summary>Ends the runner (another runtime chosen); the next format starts one.</summary>
     public async Task ResetAsync()
     {
         await turn.WaitAsync().ConfigureAwait(false);
@@ -254,14 +297,14 @@ public sealed class PrettierService : IAsyncDisposable
         private readonly Process process;
         private int ended;
 
-        private Runner(Process process, string node)
+        private Runner(Process process, NodeRuntime node)
         {
             this.process = process;
             Node = node;
             ProcessId = process.Id;
         }
 
-        public string Node { get; }
+        public NodeRuntime Node { get; }
 
         public int ProcessId { get; }
 
@@ -272,9 +315,9 @@ public sealed class PrettierService : IAsyncDisposable
 
         /// <summary>A runner started, its fork off the window's thread, where a format pressed there would wait it
         /// out.</summary>
-        public static async Task<Runner> StartAsync(string node, string folder)
+        public static async Task<Runner> StartAsync(NodeRuntime node, string folder)
         {
-            ProcessStartInfo start = ChildProcesses.Command(node, [Script], folder);
+            ProcessStartInfo start = node.Start(Script, [], folder, pnp: YarnPnp.ManifestFor(folder));
             start.RedirectStandardInput = true;
             start.RedirectStandardOutput = true;
             start.RedirectStandardError = true;

@@ -35,9 +35,9 @@ public static class TestApp
 
 /// <summary>What the whole run shares, set before anything reads it and never changed: a folder of the run's own in the
 /// system's temporary folder, holding the IDE's state (<c>PASSENGER_SETTINGS</c>: its log, the language servers' logs,
-/// the profiler's snapshots; the agents' sockets go in a folder named for it), every test's folders, the shells' history and
-/// Godot's user folders, and an empty Git configuration in place of the person's and the system's, which every git the tests
-/// and the IDE run inherits. So a run never writes to the person's own state, log, history or Godot (<see cref="PersonsGodot"/>),
+/// the profiler's snapshots; the agents' sockets go in a folder named for it), every test's folders, the shells' history,
+/// Godot's and Biome's user folders, and an empty Git configuration in place of the person's and the system's, which every git
+/// the tests and the IDE run inherits. So a run never writes to the person's own state, log, history, Godot (<see cref="PersonsGodot"/>) or Biome,
 /// an agent of theirs never attaches to a test's window, and a person's commit signing or hooks never reach a test's commit.
 /// The folder goes when the run ends; one a run that was killed left goes when the next begins.</summary>
 public sealed class TestRun : IAsyncDisposable
@@ -77,6 +77,16 @@ public sealed class TestRun : IAsyncDisposable
     /// real path names it.</summary>
     private static IEnumerable<string> TemporaryBases() =>
         OperatingSystem.IsWindows() ? [PersonsTemporary] : [PersonsTemporary, OperatingSystem.IsMacOS() ? "/private/tmp" : "/tmp"];
+
+    /// <summary>Why the daemon of Biome's <paramref name="version"/> cannot listen in the run's Biome home, or null where it
+    /// can: on macOS its socket lies under that home's Library/Caches, whose path may pass the 103 bytes a socket's path
+    /// holds; Linux's cache folder is shorter, and Windows' daemon listens on a pipe.</summary>
+    public static string? BiomeSocketUnfit(string version)
+    {
+        string socket = Path.Combine(Environment.GetEnvironmentVariable(Passenger.App.Web.WebTool.BiomeHomeVariable) ?? string.Empty,
+            "Library", "Caches", "dev.biomejs.biome", "biome-daemon", $"biome-socket-{version}");
+        return OperatingSystem.IsMacOS() && socket.Length > 103 ? $"Biome's daemon socket in the run's folder, {socket}, is longer than the 103 bytes a socket's path holds" : null;
+    }
 
     /// <summary>The IDE's state folder for the whole run.</summary>
     public static string Settings => Path.Combine(Root, "settings");
@@ -161,6 +171,8 @@ public sealed class TestRun : IAsyncDisposable
         // Nor the person's Godot user folders: every Godot a window starts keeps its settings, logs and user:// in the run's.
         PersonsGodot.Begin();
         Environment.SetEnvironmentVariable(Passenger.App.Godot.GodotUserFolders.HomeVariable, Path.Combine(Root, "godot"));
+        // Nor the person's Biome: its daemon's socket, cache and logs, under the run's shortest folder, as its socket's path is long.
+        Environment.SetEnvironmentVariable(Passenger.App.Web.WebTool.BiomeHomeVariable, Temporary != PersonsTemporary ? Temporary : Path.Combine(Root, "biome"));
         string gitConfig = Path.Combine(Root, "gitconfig");
         File.WriteAllText(gitConfig, string.Empty);
         Environment.SetEnvironmentVariable(StateStore.Variable, Settings);
@@ -189,7 +201,7 @@ public sealed class TestRun : IAsyncDisposable
         File.WriteAllText(Path.Combine(Root, "zsh", ".zshrc"), string.Empty);
         NuGetHome();
         // No test reaches GitHub: a Passenger that checks for updates without a stand-in asks where nothing listens.
-        Environment.SetEnvironmentVariable(Passenger.App.Updates.ReleaseFeed.Variable, "http://127.0.0.1:9/repos/Zaneris/passenger/releases");
+        Environment.SetEnvironmentVariable(Passenger.App.Updates.ReleaseFeed.Variable, "http://127.0.0.1:9/repos/luzwales/passenger/releases");
         // Nor any host a browser Passenger starts asks of its own accord (its updates, its services): they go where nothing listens.
         Environment.SetEnvironmentVariable(Passenger.App.Debugging.BrowserRun.ProxyVariable, "127.0.0.1:9");
         // Nor Microsoft's .NET release metadata: Install .NET SDK without a stand-in asks where nothing listens.
@@ -235,9 +247,9 @@ public sealed class TestRun : IAsyncDisposable
             OwnEnvironment.Set(colour, null);
         }
         // Nor the person's application data, where a Testing Platform app writes its first-run sentinel unless opted out.
-        Environment.SetEnvironmentVariable("TESTINGPLATFORM_TELEMETRY_OPTOUT", "1");
+        Environment.SetEnvironmentVariable(TelemetryOptOuts.TestingPlatform, TelemetryOptOuts.On);
         // Nor Avalonia's build telemetry, whose collector a build starts lingers in the project's folder for half a minute.
-        Environment.SetEnvironmentVariable("AVALONIA_TELEMETRY_OPTOUT", "1");
+        Environment.SetEnvironmentVariable(TelemetryOptOuts.Avalonia, TelemetryOptOuts.On);
         // Nor Aspire's: an aspire CLI or AppHost the run starts keeps its settings and first-run sentinel in the run's home.
         Environment.SetEnvironmentVariable("ASPIRE_HOME", Path.Combine(Root, "aspire-home"));
         Environment.SetEnvironmentVariable(AspireVariables.TelemetryOptOut, "1");
@@ -738,11 +750,11 @@ public static class OpenWindows
         };
     }
 
-    /// <summary>Closes every window still open, the last opened first, waits for what each started to end, and what each
-    /// the test closed itself started (its own limit kills what will not), then for their background work to land, which a
-    /// dispatcher that never runs again could not let go. A window left open (one that failed) leaves no warm server for the
-    /// next test: the one it would keep is ended with the rest. Whether it all landed: work that never does, the next window
-    /// test lets go of as it starts.</summary>
+    /// <summary>Closes every window still open, the last opened first, unsaved (a failed step may have taken its folder, where
+    /// a save refused would ask and keep it open into the next test), waits for what each started to end, and what each the
+    /// test closed itself started (its own limit kills what will not), then for their background work to land. A window left
+    /// open leaves no warm server for the next test: the one it would keep is ended with the rest. Whether it all landed:
+    /// work that never does, the next window test lets go of as it starts.</summary>
     public static bool CloseAll()
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -756,6 +768,10 @@ public static class OpenWindows
             Open.RemoveAt(Open.Count - 1);
             if (last.IsVisible)
             {
+                if (last is Passenger.App.MainWindow left)
+                {
+                    left.Autosaves = false;
+                }
                 last.Close();
                 if (last is Passenger.App.MainWindow { Ended: { } ended } closed)
                 {
@@ -1488,12 +1504,13 @@ public static class Ui
     private static InvalidOperationException NotEnded(string what) => new($"The wait for {what} came back before it ended");
 
     /// <summary>Waits for a launch the window started (Run, Debug, Profile, a test run) as <see cref="Await"/> does, and
-    /// fails unless it started, with its refusal and the build's own errors (<see cref="BuildErrors"/>).</summary>
+    /// fails unless it started, with its refusal, the build's own errors (<see cref="BuildErrors"/>) and, in a test of
+    /// minutes, where its time went (<see cref="Limits.WhereTheTimeWent"/>).</summary>
     public static void Launched(Passenger.App.MainWindow window, Task<string?> launch, string what, TimeSpan? limit = null)
     {
         if (Await(launch, what, limit) is { } refused)
         {
-            throw new Xunit.Sdk.XunitException($"Waiting for {what}, the window refused: {refused}{BuildErrors(window)}");
+            throw new Xunit.Sdk.XunitException($"Waiting for {what}, the window refused: {refused}{BuildErrors(window)}{Limits.WhereTheTimeWent()}");
         }
     }
 
