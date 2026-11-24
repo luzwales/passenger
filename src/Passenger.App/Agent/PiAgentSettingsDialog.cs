@@ -10,27 +10,37 @@ using Passenger.App.ToolWindows;
 
 namespace Passenger.App.Agent;
 
-/// <summary>Configures Pi Agent model profiles, protocol switching (Anthropic Messages, OpenAI Responses,
-/// OpenAI Compatible), API credentials, sampling parameters, and runs live connection probes.</summary>
+/// <summary>Configures Pi Agent provider endpoints, multiple models per endpoint, per-model thinking level,
+/// context window, max tokens, and runs live connection probes.</summary>
 public sealed class PiAgentSettingsDialog : IdeWindow
 {
-    private readonly List<AgentModelProfile> models;
-    private readonly ListBox profileList = new() { Classes = { StyleClasses.Tree } };
-    private readonly TextBox nameBox = new() { PlaceholderText = "Display name" };
-    private readonly FormDropDown providerBox = new();
+    private readonly List<AgentProviderEndpoint> providers;
+    private readonly ListBox providerList = new() { Classes = { StyleClasses.Tree } };
+    private readonly ListBox modelList = new() { Classes = { StyleClasses.Tree } };
+
+    private readonly TextBox providerNameBox = new() { PlaceholderText = "Display name (e.g. router)" };
+    private readonly FormDropDown presetBox = new();
     private readonly FormDropDown protocolBox = new();
     private readonly TextBox baseUrlBox = new() { PlaceholderText = "https://api.openai.com/v1" };
-    private readonly TextBox modelBox = new() { PlaceholderText = "gpt-4.1 / claude-sonnet-4-5 / deepseek-chat" };
     private readonly TextBox apiKeyBox = new() { PasswordChar = '•', PlaceholderText = "sk-…" };
-    private readonly TextBox temperatureBox = new() { PlaceholderText = "0.2" };
+
+    private readonly TextBox modelIdBox = new() { PlaceholderText = "gpt-4.1 / claude-sonnet-4-5 / gemini-4-hydrogen" };
+    private readonly TextBox modelNameBox = new() { PlaceholderText = "Optional friendly name" };
+    private readonly FormDropDown thinkingBox = new();
     private readonly TextBox maxTokensBox = new() { PlaceholderText = "8192" };
+    private readonly TextBox contextWindowBox = new() { PlaceholderText = "128000" };
+    private readonly TextBox temperatureBox = new() { PlaceholderText = "0.2" };
+
     private readonly Button testButton = new() { Content = "Test Connection" };
-    private readonly Button duplicateButton = new() { Content = "Duplicate" };
-    private readonly Button removeButton = new() { Content = "Remove" };
+    private readonly Button duplicateProviderButton = new() { Content = "Duplicate" };
+    private readonly Button removeProviderButton = new() { Content = "Remove" };
+    private readonly Button addModelButton = new() { Content = "Add Model" };
+    private readonly Button removeModelButton = new() { Content = "Remove Model" };
     private readonly TextBlock statusText = new() { TextWrapping = TextWrapping.Wrap, Classes = { StyleClasses.Muted } };
     private readonly PiAgentRuntime runtime;
-    private string? activeId;
-    private int selectedIndex = -1;
+
+    private int selectedProviderIndex = -1;
+    private int selectedModelIndex = -1;
     private bool loadingFields;
     private CancellationTokenSource? probing;
 
@@ -39,33 +49,48 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         FormRows.Scope(this);
         this.runtime = runtime;
         PiAgentConfig clean = config.Clamped();
-        models = [.. clean.Models];
-        if (models.Count == 0)
+        providers = [.. clean.Providers];
+        if (providers.Count == 0)
         {
-            models.Add(AgentModelProfile.Create(AgentProviderKind.OpenAI));
+            providers.Add(AgentProviderEndpoint.Create(AgentProviderKind.OpenAI));
         }
-        activeId = clean.ActiveModelId ?? models[0].Id;
 
         Title = "Pi Agent Settings";
-        Width = DialogWidths.Wide;
-        Height = 560;
-        MinWidth = 600;
-        MinHeight = 480;
+        Width = DialogWidths.Workspace;
+        Height = 720;
+        MinWidth = 680;
+        MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-        AutomationProperties.SetName(profileList, "Model Profiles");
+        AutomationProperties.SetName(providerList, "Provider Endpoints");
+        AutomationProperties.SetName(modelList, "Endpoint Models");
+        AutomationProperties.SetName(providerNameBox, "Provider Name");
+        AutomationProperties.SetName(presetBox, "Provider Preset");
+        AutomationProperties.SetName(protocolBox, "Protocol");
+        AutomationProperties.SetName(baseUrlBox, "Base URL");
+        AutomationProperties.SetName(apiKeyBox, "API Key");
+        AutomationProperties.SetName(modelIdBox, "Model ID");
+        AutomationProperties.SetName(modelNameBox, "Model Display Name");
+        AutomationProperties.SetName(thinkingBox, "Thinking Level");
+        AutomationProperties.SetName(maxTokensBox, "Max Output Tokens");
+        AutomationProperties.SetName(contextWindowBox, "Context Window");
+        AutomationProperties.SetName(temperatureBox, "Temperature");
         AutomationProperties.SetName(testButton, "Test Connection");
-        AutomationProperties.SetName(duplicateButton, "Duplicate Profile");
-        AutomationProperties.SetName(removeButton, "Remove Profile");
+        AutomationProperties.SetName(duplicateProviderButton, "Duplicate Provider");
+        AutomationProperties.SetName(removeProviderButton, "Remove Provider");
+        AutomationProperties.SetName(addModelButton, "Add Model");
+        AutomationProperties.SetName(removeModelButton, "Remove Model");
 
-        // Align dropdowns inside the form column to a uniform width (DialogButtonsTests).
-        providerBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+        presetBox.HorizontalAlignment = HorizontalAlignment.Stretch;
         protocolBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+        thinkingBox.HorizontalAlignment = HorizontalAlignment.Stretch;
 
-        providerBox.ItemsSource = AgentProviderPreset.All;
+        presetBox.ItemsSource = AgentProviderPreset.All;
         protocolBox.ItemsSource = AgentProtocolCatalog.All;
+        ThinkingChoice[] thinkingChoices = [.. AgentThinkingCatalog.All.Select(l => new ThinkingChoice(l))];
+        thinkingBox.ItemsSource = thinkingChoices;
 
-        ReusedRows.Use(providerBox, () =>
+        ReusedRows.Use(presetBox, () =>
         {
             TextBlock text = new() { VerticalAlignment = VerticalAlignment.Center };
             return text.Showing<AgentProviderPreset>(p => text.Text = p.Name);
@@ -75,7 +100,13 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             TextBlock text = new() { VerticalAlignment = VerticalAlignment.Center };
             return text.Showing<AgentProtocolOption>(p => text.Text = p.Name);
         });
-        ReusedRows.Use(profileList, () =>
+        ReusedRows.Use(thinkingBox, () =>
+        {
+            TextBlock text = new() { VerticalAlignment = VerticalAlignment.Center };
+            return text.Showing<ThinkingChoice>(choice => text.Text = AgentThinkingCatalog.Label(choice.Level));
+        });
+
+        ReusedRows.Use(providerList, () =>
         {
             TextBlock title = new() { Classes = { StyleClasses.Strong }, TextTrimming = TextTrimming.CharacterEllipsis };
             TextBlock sub = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -84,82 +115,125 @@ public sealed class PiAgentSettingsDialog : IdeWindow
                 Spacing = Gaps.Hair,
                 Margin = new Thickness(Gaps.Small, Gaps.Tight),
                 Children = { title, sub },
-            }.Showing<AgentModelProfile>(profile =>
+            }.Showing<AgentProviderEndpoint>(endpoint =>
             {
-                title.Text = profile.DisplayName;
-                sub.Text = $"{AgentProtocolCatalog.ShortLabel(profile.Protocol)} · {profile.Model}";
+                title.Text = endpoint.DisplayName;
+                sub.Text = $"{AgentProtocolCatalog.ShortLabel(endpoint.Protocol)} · {endpoint.Models.Count} model(s)";
+            });
+        });
+
+        ReusedRows.Use(modelList, () =>
+        {
+            TextBlock title = new() { Classes = { StyleClasses.Strong }, TextTrimming = TextTrimming.CharacterEllipsis };
+            TextBlock sub = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
+            return new StackPanel
+            {
+                Spacing = Gaps.Hair,
+                Margin = new Thickness(Gaps.Small, Gaps.Tight),
+                Children = { title, sub },
+            }.Showing<AgentModelEntry>(entry =>
+            {
+                title.Text = entry.DisplayName;
+                sub.Text = $"{entry.ModelId} · Think: {AgentThinkingCatalog.Label(entry.ThinkingLevel)} · Max {entry.MaxTokens}";
             });
         });
 
         temperatureBox.Text = clean.Temperature.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-        maxTokensBox.Text = clean.MaxTokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        Button addButton = new() { Content = "Add" };
-        AutomationProperties.SetName(addButton, "Add Profile");
-        addButton.Click += (_, _) => AddProfile();
-        duplicateButton.Click += (_, _) => DuplicateProfile();
-        removeButton.Click += (_, _) => RemoveProfile();
+        Button addProviderButton = new() { Content = "Add" };
+        AutomationProperties.SetName(addProviderButton, "Add Provider");
+        addProviderButton.Click += (_, _) => AddProvider();
+        duplicateProviderButton.Click += (_, _) => DuplicateProvider();
+        removeProviderButton.Click += (_, _) => RemoveProvider();
+        addModelButton.Click += (_, _) => AddModel();
+        removeModelButton.Click += (_, _) => RemoveModel();
         testButton.Click += (_, _) => IdeErrors.Observe(ProbeSelectedAsync());
 
-        profileList.SelectionChanged += (_, _) =>
+        providerList.SelectionChanged += (_, _) =>
         {
-            if (profileList.SelectedIndex >= 0 && profileList.SelectedIndex < models.Count)
+            if (providerList.SelectedIndex >= 0 && providerList.SelectedIndex < providers.Count)
             {
-                LoadProfile(profileList.SelectedIndex);
+                LoadProvider(providerList.SelectedIndex);
+            }
+        };
+        modelList.SelectionChanged += (_, _) =>
+        {
+            if (selectedProviderIndex >= 0 && modelList.SelectedIndex >= 0 && modelList.SelectedIndex < providers[selectedProviderIndex].Models.Count)
+            {
+                LoadModel(modelList.SelectedIndex);
             }
         };
 
-        nameBox.TextChanged += (_, _) => CommitFieldEdits();
-        baseUrlBox.TextChanged += (_, _) => CommitFieldEdits();
-        modelBox.TextChanged += (_, _) => CommitFieldEdits();
-        apiKeyBox.TextChanged += (_, _) => CommitFieldEdits();
-        providerBox.SelectionChanged += (_, _) => ApplyProviderPreset();
-        protocolBox.SelectionChanged += (_, _) => CommitFieldEdits();
+        providerNameBox.TextChanged += (_, _) => CommitProviderEdits();
+        baseUrlBox.TextChanged += (_, _) => CommitProviderEdits();
+        apiKeyBox.TextChanged += (_, _) => CommitProviderEdits();
+        presetBox.SelectionChanged += (_, _) => ApplyProviderPreset();
+        protocolBox.SelectionChanged += (_, _) => CommitProviderEdits();
 
-        StackPanel listActions = new()
+        modelIdBox.TextChanged += (_, _) => CommitModelEdits();
+        modelNameBox.TextChanged += (_, _) => CommitModelEdits();
+        thinkingBox.SelectionChanged += (_, _) => CommitModelEdits();
+        maxTokensBox.TextChanged += (_, _) => CommitModelEdits();
+        contextWindowBox.TextChanged += (_, _) => CommitModelEdits();
+
+        ToolFlow providerActions = new()
         {
-            Orientation = Orientation.Horizontal,
             Spacing = Gaps.Small,
-            Children = { addButton, duplicateButton, removeButton },
+            Margin = new Thickness(0, Gaps.Normal, 0, 0),
+            Children = { addProviderButton, duplicateProviderButton, removeProviderButton },
         };
-        Border listFrame = new() { Classes = { StyleClasses.Framed }, Child = profileList };
-        DockPanel leftPane = new() { LastChildFill = true };
-        DockPanel.SetDock(listActions, Dock.Bottom);
-        listActions.Margin = new Thickness(0, Gaps.Normal, 0, 0);
-        leftPane.Children.Add(listActions);
-        leftPane.Children.Add(listFrame);
+        Border providerFrame = new() { Classes = { StyleClasses.Framed }, Child = providerList };
+        DockPanel leftPane = new() { LastChildFill = true, Margin = new Thickness(0, 0, Gaps.Normal, 0) };
+        DockPanel.SetDock(providerActions, Dock.Bottom);
+        leftPane.Children.Add(providerActions);
+        leftPane.Children.Add(providerFrame);
+
+        Border modelFrame = new() { Classes = { StyleClasses.Framed }, Height = 104, Child = modelList };
+        ToolFlow modelButtons = new()
+        {
+            Spacing = Gaps.Small,
+            Children = { addModelButton, removeModelButton },
+        };
+
+        ToolFlow probeRow = new()
+        {
+            Spacing = Gaps.Normal,
+            Margin = new Thickness(0, Gaps.Tight, 0, 0),
+            Children = { testButton, statusText },
+        };
+        ToolFlow.SetFills(statusText, new ToolLayout.Fills(80));
 
         StackPanel fields = new()
         {
             Spacing = Gaps.Normal,
             Children =
             {
-                FormRows.Of("Name", nameBox),
-                FormRows.Of("Provider", providerBox),
+                new TextBlock { Text = "Endpoint", Classes = { StyleClasses.PaneTitle } },
+                FormRows.Of("Name", providerNameBox),
+                FormRows.Of("Preset", presetBox),
                 FormRows.Of("Protocol", protocolBox),
                 FormRows.Of("Base URL", baseUrlBox),
-                FormRows.Of("Model", modelBox),
                 FormRows.Of("API Key", apiKeyBox),
                 new TextBlock
                 {
-                    Text = "Sampling (applied across sessions)",
+                    Text = "Models on this endpoint",
                     Classes = { StyleClasses.PaneTitle },
-                    Margin = new Thickness(0, Gaps.Normal, 0, 0),
-                },
-                FormRows.Of("Temperature", temperatureBox),
-                FormRows.Of("Max Tokens", maxTokensBox),
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = Gaps.Normal,
                     Margin = new Thickness(0, Gaps.Tight, 0, 0),
-                    Children = { testButton, statusText },
                 },
+                modelFrame,
+                modelButtons,
+                FormRows.Of("Model ID", modelIdBox),
+                FormRows.Of("Display Name", modelNameBox),
+                FormRows.Of("Thinking", thinkingBox),
+                FormRows.Of("Max Tokens", maxTokensBox),
+                FormRows.Of("Context Window", contextWindowBox),
+                FormRows.Of("Temperature", temperatureBox),
+                probeRow,
             },
         };
 
-        ScrollViewer rightScroll = new() { Content = fields };
-        PaneSplit split = new(leftPane, rightScroll, "230,1,*");
+        ScrollViewer rightScroll = new() { Content = fields, Margin = new Thickness(Gaps.Normal, 0, 0, 0) };
+        PaneSplit split = new(leftPane, rightScroll, "250,1,*") { [DialogFooter.InsetProperty] = true };
 
         Button ok = DialogFooter.Default("Save");
         ok.Click += (_, _) => Accept();
@@ -172,44 +246,113 @@ public sealed class PiAgentSettingsDialog : IdeWindow
             probing = null;
         };
 
-        int initial = models.FindIndex(m => m.Id == activeId);
-        RefreshList(initial >= 0 ? initial : 0);
-        Opened += (_, _) => Dispatcher.UIThread.Post(() => modelBox.Focus(), DispatcherPriority.Loaded);
+        int initialProvider = providers.FindIndex(p => string.Equals(p.Id, clean.ActiveProviderId, StringComparison.Ordinal));
+        RefreshProviderList(initialProvider >= 0 ? initialProvider : 0, clean.ActiveModelEntryId);
+        Opened += (_, _) => Dispatcher.UIThread.Post(() => modelIdBox.Focus(), DispatcherPriority.Loaded);
     }
 
     public PiAgentConfig? Result { get; private set; }
 
-    private void RefreshList(int select)
+    private void RefreshProviderList(int selectIndex, string? preferredModelId = null)
     {
-        int clamped = Math.Clamp(select, 0, Math.Max(0, models.Count - 1));
-        profileList.ItemsSource = models.ToList();
-        if (models.Count > 0)
+        int clamped = Math.Clamp(selectIndex, 0, Math.Max(0, providers.Count - 1));
+        loadingFields = true;
+        try
         {
-            profileList.SelectedIndex = clamped;
-            LoadProfile(clamped);
+            providerList.ItemsSource = providers.ToList();
+            if (providers.Count > 0)
+            {
+                providerList.SelectedIndex = clamped;
+            }
         }
-        removeButton.IsEnabled = models.Count > 1;
-        duplicateButton.IsEnabled = models.Count > 0;
+        finally
+        {
+            loadingFields = false;
+        }
+        if (providers.Count > 0)
+        {
+            LoadProvider(clamped, preferredModelId);
+        }
+        removeProviderButton.IsEnabled = providers.Count > 1;
+        duplicateProviderButton.IsEnabled = providers.Count > 0;
     }
 
-    private void LoadProfile(int index)
+    private void LoadProvider(int index, string? preferredModelId = null)
     {
-        if (index < 0 || index >= models.Count)
+        if (index < 0 || index >= providers.Count)
         {
             return;
         }
         loadingFields = true;
         try
         {
-            selectedIndex = index;
-            AgentModelProfile profile = models[index];
-            activeId = profile.Id;
-            nameBox.Text = profile.Name;
-            providerBox.SelectedItem = AgentProviderPreset.For(profile.Provider);
-            protocolBox.SelectedItem = AgentProtocolCatalog.For(profile.Protocol);
-            baseUrlBox.Text = profile.BaseUrl;
-            modelBox.Text = profile.Model;
-            apiKeyBox.Text = profile.ApiKey;
+            selectedProviderIndex = index;
+            AgentProviderEndpoint endpoint = providers[index];
+            providerNameBox.Text = endpoint.Name;
+            presetBox.SelectedItem = AgentProviderPreset.For(endpoint.Provider);
+            protocolBox.SelectedItem = AgentProtocolCatalog.For(endpoint.Protocol);
+            baseUrlBox.Text = endpoint.BaseUrl;
+            apiKeyBox.Text = endpoint.ApiKey;
+        }
+        finally
+        {
+            loadingFields = false;
+        }
+        int modelIdx = preferredModelId is not null
+            ? providers[index].Models.ToList().FindIndex(m => string.Equals(m.Id, preferredModelId, StringComparison.Ordinal))
+            : 0;
+        RefreshModelList(modelIdx >= 0 ? modelIdx : 0);
+    }
+
+    private void RefreshModelList(int selectIndex)
+    {
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        IReadOnlyList<AgentModelEntry> list = providers[selectedProviderIndex].Models;
+        int clamped = Math.Clamp(selectIndex, 0, Math.Max(0, list.Count - 1));
+        loadingFields = true;
+        try
+        {
+            modelList.ItemsSource = list.ToList();
+            if (list.Count > 0)
+            {
+                modelList.SelectedIndex = clamped;
+            }
+        }
+        finally
+        {
+            loadingFields = false;
+        }
+        if (list.Count > 0)
+        {
+            LoadModel(clamped);
+        }
+        removeModelButton.IsEnabled = list.Count > 1;
+    }
+
+    private void LoadModel(int index)
+    {
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        IReadOnlyList<AgentModelEntry> list = providers[selectedProviderIndex].Models;
+        if (index < 0 || index >= list.Count)
+        {
+            return;
+        }
+        loadingFields = true;
+        try
+        {
+            selectedModelIndex = index;
+            AgentModelEntry entry = list[index];
+            modelIdBox.Text = entry.ModelId;
+            modelNameBox.Text = entry.Name;
+            thinkingBox.SelectedItem = new ThinkingChoice(entry.ThinkingLevel);
+            maxTokensBox.Text = entry.MaxTokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            contextWindowBox.Text = entry.ContextWindow.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         finally
         {
@@ -219,29 +362,27 @@ public sealed class PiAgentSettingsDialog : IdeWindow
 
     private void ApplyProviderPreset()
     {
-        if (loadingFields || selectedIndex < 0 || selectedIndex >= models.Count || providerBox.SelectedItem is not AgentProviderPreset preset)
+        if (loadingFields || selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count || presetBox.SelectedItem is not AgentProviderPreset preset)
         {
             return;
         }
         loadingFields = true;
         try
         {
-            AgentModelProfile current = models[selectedIndex];
-            AgentModelProfile updated = (current with
+            AgentProviderEndpoint current = providers[selectedProviderIndex];
+            AgentProviderEndpoint updated = (current with
             {
                 Provider = preset.Kind,
                 Protocol = preset.Protocol,
                 BaseUrl = preset.BaseUrl,
-                Model = string.IsNullOrWhiteSpace(preset.Model) ? current.Model : preset.Model,
                 Name = preset.Name,
             }).Clamped();
-            models[selectedIndex] = updated;
-            nameBox.Text = updated.Name;
+            providers[selectedProviderIndex] = updated;
+            providerNameBox.Text = updated.Name;
             protocolBox.SelectedItem = AgentProtocolCatalog.For(updated.Protocol);
             baseUrlBox.Text = updated.BaseUrl;
-            modelBox.Text = updated.Model;
-            profileList.ItemsSource = models.ToList();
-            profileList.SelectedIndex = selectedIndex;
+            providerList.ItemsSource = providers.ToList();
+            providerList.SelectedIndex = selectedProviderIndex;
         }
         finally
         {
@@ -249,69 +390,176 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         }
     }
 
-    private void CommitFieldEdits()
+    private void CommitProviderEdits()
     {
-        if (loadingFields || selectedIndex < 0 || selectedIndex >= models.Count)
+        if (loadingFields || selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
         {
             return;
         }
-        AgentProviderKind provider = providerBox.SelectedItem is AgentProviderPreset p ? p.Kind : models[selectedIndex].Provider;
-        AgentProtocol protocol = protocolBox.SelectedItem is AgentProtocolOption opt ? opt.Kind : models[selectedIndex].Protocol;
-        models[selectedIndex] = (models[selectedIndex] with
+        AgentProviderKind provider = presetBox.SelectedItem is AgentProviderPreset p ? p.Kind : providers[selectedProviderIndex].Provider;
+        AgentProtocol protocol = protocolBox.SelectedItem is AgentProtocolOption opt ? opt.Kind : providers[selectedProviderIndex].Protocol;
+        providers[selectedProviderIndex] = (providers[selectedProviderIndex] with
         {
-            Name = nameBox.Text ?? string.Empty,
+            Name = providerNameBox.Text ?? string.Empty,
             Provider = provider,
             Protocol = protocol,
             BaseUrl = baseUrlBox.Text ?? string.Empty,
-            Model = modelBox.Text ?? string.Empty,
             ApiKey = apiKeyBox.Text ?? string.Empty,
         }).Clamped();
-        profileList.ItemsSource = models.ToList();
-        profileList.SelectedIndex = selectedIndex;
-    }
-
-    private void AddProfile()
-    {
-        AgentModelProfile added = AgentModelProfile.Create(AgentProviderKind.OpenAI) with
+        loadingFields = true;
+        try
         {
-            Id = AgentModelProfile.NewId(),
-            Name = $"Profile {models.Count + 1}",
-        };
-        models.Add(added);
-        RefreshList(models.Count - 1);
+            providerList.ItemsSource = providers.ToList();
+            providerList.SelectedIndex = selectedProviderIndex;
+        }
+        finally
+        {
+            loadingFields = false;
+        }
     }
 
-    private void DuplicateProfile()
+    private void CommitModelEdits()
     {
-        if (selectedIndex < 0 || selectedIndex >= models.Count)
+        if (loadingFields || selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
         {
             return;
         }
-        AgentModelProfile copy = models[selectedIndex] with
-        {
-            Id = AgentModelProfile.NewId(),
-            Name = models[selectedIndex].DisplayName + " Copy",
-        };
-        models.Add(copy);
-        RefreshList(models.Count - 1);
-    }
-
-    private void RemoveProfile()
-    {
-        if (models.Count <= 1 || selectedIndex < 0 || selectedIndex >= models.Count)
+        AgentProviderEndpoint endpoint = providers[selectedProviderIndex];
+        if (selectedModelIndex < 0 || selectedModelIndex >= endpoint.Models.Count)
         {
             return;
         }
-        models.RemoveAt(selectedIndex);
-        RefreshList(Math.Min(selectedIndex, models.Count - 1));
+        AgentModelEntry existing = endpoint.Models[selectedModelIndex];
+        AgentThinkingLevel thinking = thinkingBox.SelectedItem is ThinkingChoice choice ? choice.Level : existing.ThinkingLevel;
+        int maxTokens = int.TryParse(maxTokensBox.Text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int m)
+            ? m
+            : existing.MaxTokens;
+        long contextWindow = long.TryParse(contextWindowBox.Text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long cw)
+            ? cw
+            : existing.ContextWindow;
+
+        List<AgentModelEntry> updatedModels = [.. endpoint.Models];
+        updatedModels[selectedModelIndex] = (existing with
+        {
+            ModelId = modelIdBox.Text ?? string.Empty,
+            Name = modelNameBox.Text ?? string.Empty,
+            ThinkingLevel = thinking,
+            MaxTokens = maxTokens,
+            ContextWindow = contextWindow,
+        }).Clamped(existing.ModelId);
+
+        providers[selectedProviderIndex] = (endpoint with { Models = updatedModels }).Clamped();
+        loadingFields = true;
+        try
+        {
+            modelList.ItemsSource = providers[selectedProviderIndex].Models.ToList();
+            modelList.SelectedIndex = selectedModelIndex;
+            providerList.ItemsSource = providers.ToList();
+            providerList.SelectedIndex = selectedProviderIndex;
+        }
+        finally
+        {
+            loadingFields = false;
+        }
+    }
+
+    private void AddProvider()
+    {
+        AgentProviderEndpoint added = AgentProviderEndpoint.Create(AgentProviderKind.Custom) with
+        {
+            Id = AgentProviderEndpoint.NewId(),
+            Name = $"Endpoint {providers.Count + 1}",
+        };
+        providers.Add(added);
+        RefreshProviderList(providers.Count - 1);
+    }
+
+    private void DuplicateProvider()
+    {
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        AgentProviderEndpoint source = providers[selectedProviderIndex];
+        List<AgentModelEntry> copiedModels = [.. source.Models.Select(m => m with { Id = AgentModelEntry.NewId() })];
+        AgentProviderEndpoint copy = source with
+        {
+            Id = AgentProviderEndpoint.NewId(),
+            Name = source.DisplayName + " Copy",
+            Models = copiedModels,
+        };
+        providers.Add(copy);
+        RefreshProviderList(providers.Count - 1);
+    }
+
+    private void RemoveProvider()
+    {
+        if (providers.Count <= 1 || selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        providers.RemoveAt(selectedProviderIndex);
+        RefreshProviderList(Math.Min(selectedProviderIndex, providers.Count - 1));
+    }
+
+    private void AddModel()
+    {
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        AgentProviderEndpoint endpoint = providers[selectedProviderIndex];
+        List<AgentModelEntry> list = [.. endpoint.Models];
+        AgentModelEntry added = AgentModelEntry.Create($"model-{list.Count + 1}");
+        list.Add(added);
+        providers[selectedProviderIndex] = (endpoint with { Models = list }).Clamped();
+        RefreshModelList(list.Count - 1);
+    }
+
+    private void RemoveModel()
+    {
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
+        {
+            return;
+        }
+        AgentProviderEndpoint endpoint = providers[selectedProviderIndex];
+        if (endpoint.Models.Count <= 1 || selectedModelIndex < 0 || selectedModelIndex >= endpoint.Models.Count)
+        {
+            return;
+        }
+        List<AgentModelEntry> list = [.. endpoint.Models];
+        list.RemoveAt(selectedModelIndex);
+        providers[selectedProviderIndex] = (endpoint with { Models = list }).Clamped();
+        RefreshModelList(Math.Min(selectedModelIndex, list.Count - 1));
     }
 
     private async Task ProbeSelectedAsync()
     {
-        if (selectedIndex < 0 || selectedIndex >= models.Count)
+        if (selectedProviderIndex < 0 || selectedProviderIndex >= providers.Count)
         {
             return;
         }
+        CommitProviderEdits();
+        CommitModelEdits();
+        AgentProviderEndpoint endpoint = providers[selectedProviderIndex];
+        AgentModelEntry entry = selectedModelIndex >= 0 && selectedModelIndex < endpoint.Models.Count
+            ? endpoint.Models[selectedModelIndex]
+            : endpoint.Models[0];
+
+        AgentModelProfile target = new()
+        {
+            Id = entry.Id,
+            Name = entry.DisplayName,
+            Provider = endpoint.Provider,
+            BaseUrl = endpoint.BaseUrl,
+            ApiKey = endpoint.ApiKey,
+            Model = entry.ModelId,
+            Protocol = endpoint.Protocol,
+            ThinkingLevel = entry.ThinkingLevel,
+            MaxTokens = entry.MaxTokens,
+            ContextWindow = entry.ContextWindow,
+        };
+
         probing?.Cancel();
         probing?.Dispose();
         probing = new CancellationTokenSource();
@@ -323,7 +571,7 @@ public sealed class PiAgentSettingsDialog : IdeWindow
         statusText.Text = "Probing endpoint…";
         try
         {
-            ConnectionTestResult probe = await runtime.TestConnectionAsync(models[selectedIndex], cancel);
+            ConnectionTestResult probe = await runtime.TestConnectionAsync(target, cancel);
             if (cancel.IsCancellationRequested)
             {
                 return;
@@ -344,20 +592,28 @@ public sealed class PiAgentSettingsDialog : IdeWindow
 
     private void Accept()
     {
-        CommitFieldEdits();
+        CommitProviderEdits();
+        CommitModelEdits();
         double temperature = double.TryParse(temperatureBox.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double t)
             ? t
             : 0.2;
-        int maxTokens = int.TryParse(maxTokensBox.Text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int m)
-            ? m
-            : 8192;
+        AgentProviderEndpoint chosenProvider = selectedProviderIndex >= 0 && selectedProviderIndex < providers.Count
+            ? providers[selectedProviderIndex]
+            : providers[0];
+        AgentModelEntry chosenModel = selectedModelIndex >= 0 && selectedModelIndex < chosenProvider.Models.Count
+            ? chosenProvider.Models[selectedModelIndex]
+            : chosenProvider.Models[0];
+
         Result = new PiAgentConfig
         {
-            Models = [.. models],
-            ActiveModelId = selectedIndex >= 0 && selectedIndex < models.Count ? models[selectedIndex].Id : activeId,
+            Providers = [.. providers],
+            ActiveProviderId = chosenProvider.Id,
+            ActiveModelEntryId = chosenModel.Id,
             Temperature = temperature,
-            MaxTokens = maxTokens,
+            MaxTokens = chosenModel.MaxTokens,
         }.Clamped();
         Close(true);
     }
+
+    private sealed record ThinkingChoice(AgentThinkingLevel Level);
 }

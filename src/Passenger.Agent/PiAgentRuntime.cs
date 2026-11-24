@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Passenger.Core;
 using Pi.Agent;
@@ -14,7 +15,7 @@ using ToolDefinition = Pi.CodingAgent.Core.Extensions.ToolDefinition;
 
 namespace Passenger.Agent;
 
-/// <summary>Runs Pi.CodingAgent turns over the open workspace with multi-protocol LLM switching.</summary>
+/// <summary>Runs Pi.CodingAgent turns over the open workspace with persistent shared sessions and thinking levels.</summary>
 public sealed class PiAgentRuntime
 {
     private const string ProviderId = "passenger-pi";
@@ -78,6 +79,7 @@ public sealed class PiAgentRuntime
         });
         ChannelWriter<AgentStreamEvent> writer = channel.Writer;
         AgentSession session = holder.Session;
+        string? sessionFile = session.SessionManager.GetSessionFile();
 
         using IDisposable subscription = session.Agent.Subscribe((ev, _) =>
         {
@@ -115,23 +117,25 @@ public sealed class PiAgentRuntime
         {
             try
             {
-                await writer.WriteAsync(new AgentStreamEvent.RunStarted(request.SessionId, profile.Model)).ConfigureAwait(false);
+                await writer.WriteAsync(new AgentStreamEvent.RunStarted(request.SessionId, profile.Model, sessionFile)).ConfigureAwait(false);
                 await session.PromptAsync(
                     request.Prompt,
                     new PromptOptions { Source = "interactive", Images = LoadImages(request.Images) }).ConfigureAwait(false);
 
                 AssistantMessage? last = session.Messages.OfType<AssistantMessage>().LastOrDefault();
                 SessionStats stats = session.GetSessionStats();
+                string? updatedFile = session.SessionManager.GetSessionFile();
                 await writer.WriteAsync(new AgentStreamEvent.RunCompleted(
                     MapStop(last?.StopReason),
                     last?.ErrorMessage,
                     stats.Tokens.Input,
                     stats.Tokens.Output,
-                    profile.Model)).ConfigureAwait(false);
+                    profile.Model,
+                    updatedFile)).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                writer.TryWrite(new AgentStreamEvent.RunCompleted(AgentStopReason.Aborted, null, 0, 0, profile.Model));
+                writer.TryWrite(new AgentStreamEvent.RunCompleted(AgentStopReason.Aborted, null, 0, 0, profile.Model, sessionFile));
             }
             catch (Exception error)
             {
@@ -185,7 +189,7 @@ public sealed class PiAgentRuntime
         lock (sessions)
         {
             if (sessions.TryGetValue(request.SessionId, out SessionHolder? cached)
-                && cached.Matches(history, config, profile, cwd, trusted))
+                && cached.Matches(history, config, profile, cwd, trusted, request.SessionFile))
             {
                 return cached;
             }
@@ -197,15 +201,18 @@ public sealed class PiAgentRuntime
             lock (sessions)
             {
                 if (sessions.TryGetValue(request.SessionId, out SessionHolder? cached)
-                    && cached.Matches(history, config, profile, cwd, trusted))
+                    && cached.Matches(history, config, profile, cwd, trusted, request.SessionFile))
                 {
                     return cached;
                 }
             }
 
-            AgentSession session = await CreateSessionAsync(config, profile, cwd, trusted, cancel).ConfigureAwait(false);
+            AgentSession session = await CreateSessionAsync(config, profile, cwd, trusted, request.SessionFile, cancel).ConfigureAwait(false);
             InstallWorkspaceGuard(session, cwd);
-            SeedHistory(session, history);
+            if (string.IsNullOrWhiteSpace(request.SessionFile) && session.Messages.Count == 0 && history.Count > 0)
+            {
+                SeedHistory(session, history);
+            }
 
             SessionHolder holder = new()
             {
@@ -218,8 +225,11 @@ public sealed class PiAgentRuntime
                 ApiKey = profile.ApiKey,
                 BaseUrl = profile.BaseUrl,
                 Protocol = profile.Protocol,
+                ThinkingLevel = profile.ThinkingLevel,
                 Temperature = config.Temperature,
-                MaxTokens = config.MaxTokens,
+                MaxTokens = profile.MaxTokens,
+                ContextWindow = profile.ContextWindow ?? 128_000,
+                SessionFile = session.SessionManager.GetSessionFile(),
             };
             lock (sessions)
             {
@@ -238,10 +248,13 @@ public sealed class PiAgentRuntime
         AgentModelProfile profile,
         string cwd,
         bool trusted,
+        string? sessionFile,
         CancellationToken cancel)
     {
         string api = AgentProtocolCatalog.ApiId(profile.Protocol);
         HttpClient http = OutboundHttp.Client(StreamTimeout, MaxResponseBytes);
+        string thinkingText = AgentThinkingCatalog.WireName(profile.ThinkingLevel);
+        bool supportsReasoning = profile.ThinkingLevel != AgentThinkingLevel.Off;
 
         ModelRuntime runtime = await ModelRuntime.CreateAsync(new CreateModelRuntimeOptions
         {
@@ -250,6 +263,17 @@ public sealed class PiAgentRuntime
             RefreshOnCreate = false,
             Signal = cancel,
         }).ConfigureAwait(false);
+
+        ThinkingLevelMap thinkingLevelMap = ThinkingLevelMap.FromJsonObject(new JsonObject
+        {
+            ["off"] = "off",
+            ["minimal"] = "minimal",
+            ["low"] = "low",
+            ["medium"] = "medium",
+            ["high"] = "high",
+            ["xhigh"] = "xhigh",
+            ["max"] = "max",
+        });
 
         runtime.RegisterProvider(ProviderId, new ProviderConfigInput
         {
@@ -267,19 +291,37 @@ public sealed class PiAgentRuntime
                     BaseUrl = profile.BaseUrl,
                     Input = [ModelInput.Text, ModelInput.Image],
                     Cost = new ModelCostRates(0, 0),
-                    Reasoning = false,
+                    Reasoning = supportsReasoning,
+                    ThinkingLevelMap = thinkingLevelMap,
                     ContextWindow = profile.ContextWindow ?? 128_000,
-                    MaxTokens = config.MaxTokens,
+                    MaxTokens = profile.MaxTokens,
                 },
             ],
-            StreamSimple = (spec, context, _) =>
+            StreamSimple = (spec, context, requestOptions) =>
             {
+                string? requested = requestOptions is not null && requestOptions.TryGetValue("reasoning", out object? val) && val is string s
+                    ? s
+                    : null;
+                string? reasoning = supportsReasoning
+                    ? (string.IsNullOrWhiteSpace(requested) ? thinkingText : requested)
+                    : null;
                 SimpleStreamOptions options = new(
                     ApiKey: profile.ApiKey,
                     BaseUrl: string.IsNullOrWhiteSpace(profile.BaseUrl) ? null : profile.BaseUrl,
-                    MaxTokens: config.MaxTokens,
-                    Temperature: config.Temperature);
-                ModelSpec streamingModel = spec with { Api = api, BaseUrl = profile.BaseUrl };
+                    MaxTokens: profile.MaxTokens,
+                    Temperature: config.Temperature)
+                {
+                    Reasoning = reasoning,
+                };
+                ModelSpec streamingModel = spec with
+                {
+                    Api = api,
+                    BaseUrl = profile.BaseUrl,
+                    Reasoning = supportsReasoning,
+                    ThinkingLevelMap = thinkingLevelMap,
+                    ContextWindow = profile.ContextWindow ?? 128_000,
+                    MaxTokens = profile.MaxTokens,
+                };
                 return profile.Protocol switch
                 {
                     AgentProtocol.AnthropicMessages => AnthropicMessages.StreamSimple(streamingModel, context, options, http, CancellationToken.None),
@@ -290,6 +332,11 @@ public sealed class PiAgentRuntime
         });
 
         string agentDir = Config.GetAgentDir();
+        string sessionDir = SessionFiles.GetDefaultSessionDir(cwd, agentDir);
+        SessionManager sessionManager = !string.IsNullOrWhiteSpace(sessionFile) && File.Exists(sessionFile)
+            ? SessionManager.Open(sessionFile, sessionDir, cwd)
+            : SessionManager.Create(cwd, sessionDir);
+
         SettingsManager settingsManager = SettingsManager.Create(cwd, agentDir, new SettingsManagerCreateOptions { ProjectTrusted = trusted });
         DefaultResourceLoader resourceLoader = new(cwd, agentDir, settingsManager);
         await resourceLoader.ReloadAsync(null, cancel).ConfigureAwait(false);
@@ -311,14 +358,20 @@ public sealed class PiAgentRuntime
                     Api = api,
                     Provider = ProviderId,
                     BaseUrl = profile.BaseUrl,
+                    Reasoning = supportsReasoning,
+                    ThinkingLevelMap = thinkingLevelMap,
+                    ContextWindow = profile.ContextWindow ?? 128_000,
+                    MaxTokens = profile.MaxTokens,
                 },
-                SessionManager = SessionManager.InMemory(cwd),
+                ThinkingLevel = AgentThinkingCatalog.ToPi(profile.ThinkingLevel),
+                SessionManager = sessionManager,
                 Tools = tools,
                 CustomTools = customTools,
             },
             processCwd: cwd,
             cancellationToken: cancel).ConfigureAwait(false);
 
+        created.Session.SetThinkingLevel(AgentThinkingCatalog.ToPi(profile.ThinkingLevel));
         return created.Session;
     }
 
@@ -450,15 +503,19 @@ public sealed class PiAgentRuntime
         public required string ApiKey { get; init; }
         public required string BaseUrl { get; init; }
         public required AgentProtocol Protocol { get; init; }
+        public required AgentThinkingLevel ThinkingLevel { get; init; }
         public required double Temperature { get; init; }
         public required int MaxTokens { get; init; }
+        public required long ContextWindow { get; init; }
+        public string? SessionFile { get; init; }
 
         public bool Matches(
             IReadOnlyList<AgentHistoryTurn> history,
             PiAgentConfig config,
             AgentModelProfile profile,
             string cwd,
-            bool trusted) =>
+            bool trusted,
+            string? sessionFile) =>
             string.Equals(Cwd, cwd, StringComparison.OrdinalIgnoreCase)
             && Trusted == trusted
             && ProfileId == profile.Id
@@ -466,8 +523,11 @@ public sealed class PiAgentRuntime
             && ApiKey == profile.ApiKey
             && BaseUrl == profile.BaseUrl
             && Protocol == profile.Protocol
+            && ThinkingLevel == profile.ThinkingLevel
             && Temperature.Equals(config.Temperature)
-            && MaxTokens == config.MaxTokens
+            && MaxTokens == profile.MaxTokens
+            && ContextWindow == (profile.ContextWindow ?? 128_000)
+            && (string.IsNullOrWhiteSpace(sessionFile) || string.Equals(SessionFile, sessionFile, StringComparison.OrdinalIgnoreCase))
             && ContinuesHistory(LastHistory, history);
     }
 }

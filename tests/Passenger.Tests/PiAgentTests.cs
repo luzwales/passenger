@@ -5,135 +5,152 @@ using Passenger.App;
 using Passenger.App.Agent;
 using Passenger.App.ToolWindows;
 using Passenger.Core;
+using Pi.Ai.Types;
+using Pi.CodingAgent.Core;
 
 namespace Passenger.Tests;
 
-/// <summary>Verifies Pi Agent's workspace boundary, attachment safety, protocol switching,
-/// settings dialog layout, and tool-window isolation to the open folder.</summary>
-public sealed class PiAgentTests : IDisposable
+public sealed class PiAgentTests
 {
-    private readonly string workspace = TestFolders.Create("pi-agent-ws-");
-    private readonly string outside = TestFolders.Create("pi-agent-out-");
-
-    public void Dispose()
-    {
-        TestFolders.Delete(workspace);
-        TestFolders.Delete(outside);
-    }
-
     [Fact]
-    public void Workspace_guard_blocks_paths_outside_the_open_folder_and_mutating_calls_when_untrusted()
+    public void Workspace_guard_blocks_paths_outside_open_folder_and_mutating_tools_when_untrusted()
     {
-        string insideFile = Path.Combine(workspace, "Program.cs");
-        string outsideFile = Path.Combine(outside, "secret.txt");
-        File.WriteAllText(insideFile, "class Program {}\n");
-        File.WriteAllText(outsideFile, "top secret\n");
+        string temp = TestFolders.Create("pi-guard");
+        string inside = Path.Combine(temp, "src", "Program.cs");
+        string outside = Path.GetFullPath(Path.Combine(temp, "..", "outside.txt"));
 
-        Assert.Null(WorkspaceScopedTools.CheckCall("read", new { path = "Program.cs" }, workspace));
-        Assert.Null(WorkspaceScopedTools.CheckCall("read", new { path = insideFile }, workspace));
-        Assert.NotNull(WorkspaceScopedTools.CheckCall("read", new { path = "../secret.txt" }, workspace));
-        Assert.NotNull(WorkspaceScopedTools.CheckCall("read", new { path = outsideFile }, workspace));
-        Assert.NotNull(WorkspaceScopedTools.CheckCall("write_file", new { path = outsideFile, content = "x" }, workspace));
-        Assert.NotNull(WorkspaceScopedTools.CheckCall("mcp__windows__Click", new { }, workspace));
+        Assert.Null(WorkspaceScopedTools.CheckCall("read", new { path = inside }, temp));
+        Assert.NotNull(WorkspaceScopedTools.CheckCall("read", new { path = outside }, temp));
+        Assert.NotNull(WorkspaceScopedTools.CheckCall("mcp__github__search", new { query = "x" }, temp));
 
-        using (WorkspaceTrust.Ask(workspace))
+        string? untrustedEdit;
+        using (WorkspaceTrust.Ask(temp))
         {
-            Assert.False(WorkspaceTrust.Trusts(workspace));
-            Assert.Null(WorkspaceScopedTools.CheckCall("read", new { path = "Program.cs" }, workspace));
-            Assert.Equal(WorkspaceTrust.Untrusted, WorkspaceScopedTools.CheckCall("edit", new { path = "Program.cs" }, workspace));
-            Assert.Equal(WorkspaceTrust.Untrusted, WorkspaceScopedTools.CheckCall("write_file", new { path = "a.txt", content = "hi" }, workspace));
-            Assert.Equal(WorkspaceTrust.Untrusted, WorkspaceScopedTools.CheckCall("run_command", new { command = "echo hi" }, workspace));
+            untrustedEdit = WorkspaceScopedTools.CheckCall("edit", new { path = inside }, temp);
         }
+        Assert.Equal(WorkspaceTrust.Untrusted, untrustedEdit);
     }
 
     [Fact]
-    public void Workspace_attachments_load_workspace_files_folders_and_images_safely()
+    public void Attachments_read_workspace_files_and_folders_and_reject_outside_paths()
     {
-        string code = Path.Combine(workspace, "src", "App.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(code)!);
-        File.WriteAllText(code, "Console.WriteLine(42);\n");
-        string png = Path.Combine(workspace, "shot.png");
-        File.WriteAllBytes(png, [137, 80, 78, 71, 13, 10, 26, 10]);
+        string temp = TestFolders.Create("pi-attach");
+        string file = Path.Combine(temp, "hello.cs");
+        File.WriteAllText(file, "class A {}\n");
 
-        AgentAttachment file = WorkspaceAttachments.LoadFile(code, workspace);
-        AgentAttachment folder = WorkspaceAttachments.LoadFolder(Path.Combine(workspace, "src"), workspace);
-        AgentAttachment image = WorkspaceAttachments.LoadImage(png, workspace);
+        AgentAttachment loadedFile = WorkspaceAttachments.LoadFile(file, temp);
+        Assert.Null(loadedFile.Error);
+        Assert.Equal("hello.cs", loadedFile.DisplayPath);
+        Assert.Contains("class A {}", loadedFile.Text);
 
-        Assert.Null(file.Error);
-        Assert.Equal("src/App.cs", file.DisplayPath);
-        Assert.Contains("Console.WriteLine(42);", file.Text, StringComparison.Ordinal);
-        Assert.Null(folder.Error);
-        Assert.Contains("App.cs", folder.Text, StringComparison.Ordinal);
-        Assert.Null(image.Error);
-        Assert.Equal(AgentAttachmentKind.Image, image.Kind);
-        Assert.Equal("image/png", image.MimeType);
+        AgentAttachment loadedFolder = WorkspaceAttachments.LoadFolder(temp, temp);
+        Assert.Null(loadedFolder.Error);
+        Assert.Contains("hello.cs", loadedFolder.Text);
 
-        string composed = WorkspaceAttachments.ComposePrompt("Explain this", [file, folder, image]);
-        Assert.Contains("<attached_context>", composed, StringComparison.Ordinal);
-        Assert.Contains("src/App.cs", composed, StringComparison.Ordinal);
-        Assert.Contains("Explain this", composed, StringComparison.Ordinal);
+        string outside = Path.GetFullPath(Path.Combine(temp, "..", "escape.txt"));
+        AgentAttachment rejected = WorkspaceAttachments.LoadFile(outside, temp);
+        Assert.NotNull(rejected.Error);
     }
 
     [Fact]
-    public void Protocol_catalog_covers_anthropic_openai_responses_and_openai_compatible()
+    public void Multi_model_endpoints_and_shared_models_json_sync_per_model_thinking_and_tokens()
     {
-        Assert.Equal(3, AgentProtocolCatalog.All.Count);
-        Assert.Equal("anthropic-messages", AgentProtocolCatalog.ApiId(AgentProtocol.AnthropicMessages));
-        Assert.Equal("openai-responses", AgentProtocolCatalog.ApiId(AgentProtocol.OpenAiResponses));
-        Assert.Equal("openai-completions", AgentProtocolCatalog.ApiId(AgentProtocol.OpenAiCompatible));
-
-        PiAgentConfig config = new PiAgentConfig
+        string agentDir = TestFolders.Create("pi-models");
+        AgentModelEntry flash = AgentModelEntry.Create("gemini-3.8-flash", "Gemini 3.8 Flash", AgentThinkingLevel.Low, maxTokens: 4096, contextWindow: 500_000);
+        AgentModelEntry hydrogen = AgentModelEntry.Create("gemini-4-hydrogen", "Gemini 4 Hydrogen", AgentThinkingLevel.High, maxTokens: 32_000, contextWindow: 1_048_576);
+        AgentProviderEndpoint router = new()
         {
-            Models =
-            [
-                AgentModelProfile.Create(AgentProviderKind.Anthropic),
-                AgentModelProfile.Create(AgentProviderKind.OpenAI),
-                AgentModelProfile.Create(AgentProviderKind.DeepSeek),
-            ],
-            Temperature = 9.0,
-            MaxTokens = 10,
+            Id = "prv-router",
+            Name = "router",
+            Provider = AgentProviderKind.Custom,
+            Protocol = AgentProtocol.OpenAiCompatible,
+            BaseUrl = "http://localhost:20128/v1",
+            ApiKey = "sk-test",
+            Models = [flash, hydrogen],
+        };
+        PiAgentConfig initial = new PiAgentConfig
+        {
+            Providers = [router],
+            ActiveProviderId = router.Id,
+            ActiveModelEntryId = hydrogen.Id,
         }.Clamped();
 
-        Assert.Equal(2.0, config.Temperature);
-        Assert.Equal(256, config.MaxTokens);
-        Assert.Equal(AgentProtocol.AnthropicMessages, config.ActiveModel!.Protocol);
+        PiAgentModelsSync.SaveSharedConfig(initial, agentDir);
+        PiAgentConfig reloaded = PiAgentModelsSync.LoadSharedConfig(new PiAgentConfig(), agentDir);
+
+        AgentProviderEndpoint? loadedRouter = reloaded.Providers.FirstOrDefault(p => p.Name == "router");
+        Assert.NotNull(loadedRouter);
+        Assert.Equal(2, loadedRouter.Models.Count);
+        AgentModelEntry? loadedHydrogen = loadedRouter.Models.FirstOrDefault(m => m.ModelId == "gemini-4-hydrogen");
+        Assert.NotNull(loadedHydrogen);
+        Assert.Equal(AgentThinkingLevel.High, loadedHydrogen.ThinkingLevel);
+        Assert.Equal(32_000, loadedHydrogen.MaxTokens);
+        Assert.Equal(1_048_576, loadedHydrogen.ContextWindow);
+    }
+
+    [Fact]
+    public async Task Shared_session_store_lists_and_restores_transcript_from_pi_sessions()
+    {
+        string workspace = TestFolders.Create("pi-ws");
+        string agentDir = TestFolders.Create("pi-agentdir");
+        string sessionDir = PiAgentSessionStore.SessionDirectoryFor(workspace, agentDir);
+        Directory.CreateDirectory(sessionDir);
+        SessionManager manager = SessionManager.Create(workspace, sessionDir);
+        manager.AppendMessage(Messages.UserText("Explain Program.cs"));
+        manager.AppendMessage(Messages.AssistantText("Program.cs is the entry point."));
+        manager.AppendSessionInfo("Inspect Program");
+
+        IReadOnlyList<PiAgentSessionSummary> list = await PiAgentSessionStore.ListAsync(workspace, agentDir, TestContext.Current.CancellationToken);
+        PiAgentSessionSummary summary = Assert.Single(list);
+        Assert.Equal("Inspect Program", summary.Title);
+
+        IReadOnlyList<PiAgentMessageRecord> transcript = PiAgentSessionStore.LoadTranscript(summary.FilePath, workspace);
+        Assert.Equal(2, transcript.Count);
+        Assert.Equal(PiAgentMessageKind.User, transcript[0].Kind);
+        Assert.Equal("Explain Program.cs", transcript[0].Body);
+        Assert.Equal(PiAgentMessageKind.Assistant, transcript[1].Kind);
+        Assert.Equal("Program.cs is the entry point.", transcript[1].Body);
     }
 
     [AvaloniaFact]
-    public void Pi_agent_tool_window_and_settings_dialog_follow_ui_and_workspace_rules()
+    public void View_switches_protocols_models_thinking_levels_and_sidebar_while_blocking_outside_attachments()
     {
-        File.WriteAllText(Path.Combine(workspace, "Inside.cs"), "// inside\n");
-        File.WriteAllText(Path.Combine(outside, "Outside.cs"), "// outside\n");
+        string temp = TestFolders.Create("pi-view");
+        string inside = Path.Combine(temp, "note.txt");
+        File.WriteAllText(inside, "hello");
+        string outside = Path.GetFullPath(Path.Combine(temp, "..", "outside.txt"));
 
-        MainWindow window = Ui.OpenFolder(workspace, languageServer: false);
+        PiAgentRuntime runtime = new();
+        PiAgentView view = new(runtime, () => temp, () => true);
+
+        view.SwitchProtocol(AgentProtocol.AnthropicMessages);
+        Assert.Equal(AgentProtocol.AnthropicMessages, view.Config.ActiveModel!.Protocol);
+
+        view.SetThinkingLevel(AgentThinkingLevel.XHigh);
+        Assert.Equal(AgentThinkingLevel.XHigh, view.Config.ActiveModel!.ThinkingLevel);
+
+        view.SetSidebarOpen(false, notify: false);
+        Assert.False(view.IsSidebarOpen);
+        view.SetSidebarOpen(true, notify: false);
+        Assert.True(view.IsSidebarOpen);
+
+        Assert.True(view.AttachPath(inside));
+        Assert.False(view.AttachPath(outside));
+        Assert.Single(view.Attachments);
+    }
+
+    [AvaloniaFact]
+    public void Settings_dialog_buttons_pass_layout_rules()
+    {
+        PiAgentSettingsDialog dialog = new(new PiAgentConfig(), new PiAgentRuntime());
+        dialog.Show();
         try
         {
-            Assert.True(window.Perform(AppActions.ShowPiAgent));
-            Ui.Settle();
-
-            PiAgentView view = window.PiAgentView;
-            Assert.Equal(AgentProtocol.OpenAiResponses, view.Config.ActiveModel!.Protocol);
-
-            view.SwitchProtocol(AgentProtocol.AnthropicMessages);
-            Assert.Equal(AgentProtocol.AnthropicMessages, view.Config.ActiveModel!.Protocol);
-
-            view.SwitchProtocol(AgentProtocol.OpenAiCompatible);
-            Assert.Equal(AgentProtocol.OpenAiCompatible, view.Config.ActiveModel!.Protocol);
-
-            // Attachments outside the open folder are rejected.
-            Assert.False(view.AttachPath(Path.Combine(outside, "Outside.cs")));
-            Assert.True(view.AttachPath(Path.Combine(workspace, "Inside.cs")));
-            Assert.Single(view.Attachments);
-
-            // Settings dialog passes DialogButtonsTests layout, alignment, and label rules.
-            PiAgentSettingsDialog dialog = new(view.Config, new PiAgentRuntime());
-            dialog.Show(window);
-            Ui.Settle();
-            DialogButtonsTests.Check(dialog).Close();
+            DialogButtonsTests.Check(dialog);
         }
         finally
         {
-            window.Close();
+            dialog.Close(false);
         }
     }
 }

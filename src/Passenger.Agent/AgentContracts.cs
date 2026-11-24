@@ -1,3 +1,5 @@
+using Pi.Ai.Types;
+
 namespace Passenger.Agent;
 
 /// <summary>Model wire protocol supported by the Pi agent runtime.</summary>
@@ -8,7 +10,7 @@ public enum AgentProtocol
     AnthropicMessages,
 }
 
-/// <summary>Provider preset kind for quick defaults in profile setup.</summary>
+/// <summary>Provider preset kind for quick defaults in endpoint setup.</summary>
 public enum AgentProviderKind
 {
     OpenAI,
@@ -46,6 +48,13 @@ public static class AgentProtocolCatalog
     public static AgentProtocolOption For(AgentProtocol kind) =>
         All.FirstOrDefault(option => option.Kind == kind) ?? OpenAiCompatible;
 
+    public static AgentProtocol FromApiId(string? apiId) => apiId?.Trim().ToLowerInvariant() switch
+    {
+        "anthropic-messages" => AgentProtocol.AnthropicMessages,
+        "openai-responses" => AgentProtocol.OpenAiResponses,
+        _ => AgentProtocol.OpenAiCompatible,
+    };
+
     public static string ShortLabel(AgentProtocol kind) => kind switch
     {
         AgentProtocol.OpenAiResponses => "Responses",
@@ -54,6 +63,90 @@ public static class AgentProtocolCatalog
     };
 
     public static string ApiId(AgentProtocol kind) => For(kind).ApiId;
+}
+
+/// <summary>Supported thinking/reasoning levels for a Pi Agent model.</summary>
+public enum AgentThinkingLevel
+{
+    Off,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+/// <summary>Display and Pi.Ai mapping helpers for per-model thinking levels.</summary>
+public static class AgentThinkingCatalog
+{
+    public static readonly IReadOnlyList<AgentThinkingLevel> All =
+    [
+        AgentThinkingLevel.Off,
+        AgentThinkingLevel.Minimal,
+        AgentThinkingLevel.Low,
+        AgentThinkingLevel.Medium,
+        AgentThinkingLevel.High,
+        AgentThinkingLevel.XHigh,
+        AgentThinkingLevel.Max,
+    ];
+
+    public static string Label(AgentThinkingLevel level) => level switch
+    {
+        AgentThinkingLevel.Off => "Off",
+        AgentThinkingLevel.Minimal => "Minimal",
+        AgentThinkingLevel.Low => "Low",
+        AgentThinkingLevel.Medium => "Medium",
+        AgentThinkingLevel.High => "High",
+        AgentThinkingLevel.XHigh => "XHigh",
+        AgentThinkingLevel.Max => "Max",
+        _ => "Off",
+    };
+
+    public static string WireName(AgentThinkingLevel level) => level switch
+    {
+        AgentThinkingLevel.Off => "off",
+        AgentThinkingLevel.Minimal => "minimal",
+        AgentThinkingLevel.Low => "low",
+        AgentThinkingLevel.Medium => "medium",
+        AgentThinkingLevel.High => "high",
+        AgentThinkingLevel.XHigh => "xhigh",
+        AgentThinkingLevel.Max => "max",
+        _ => "off",
+    };
+
+    public static ThinkingLevel ToPi(AgentThinkingLevel level) => level switch
+    {
+        AgentThinkingLevel.Minimal => ThinkingLevel.Minimal,
+        AgentThinkingLevel.Low => ThinkingLevel.Low,
+        AgentThinkingLevel.Medium => ThinkingLevel.Medium,
+        AgentThinkingLevel.High => ThinkingLevel.High,
+        AgentThinkingLevel.XHigh => ThinkingLevel.XHigh,
+        AgentThinkingLevel.Max => ThinkingLevel.Max,
+        _ => ThinkingLevel.Off,
+    };
+
+    public static AgentThinkingLevel FromPi(ThinkingLevel level) => level switch
+    {
+        ThinkingLevel.Minimal => AgentThinkingLevel.Minimal,
+        ThinkingLevel.Low => AgentThinkingLevel.Low,
+        ThinkingLevel.Medium => AgentThinkingLevel.Medium,
+        ThinkingLevel.High => AgentThinkingLevel.High,
+        ThinkingLevel.XHigh => AgentThinkingLevel.XHigh,
+        ThinkingLevel.Max => AgentThinkingLevel.Max,
+        _ => AgentThinkingLevel.Off,
+    };
+
+    public static AgentThinkingLevel Parse(string? text) => text?.Trim().ToLowerInvariant() switch
+    {
+        "minimal" => AgentThinkingLevel.Minimal,
+        "low" => AgentThinkingLevel.Low,
+        "medium" => AgentThinkingLevel.Medium,
+        "high" => AgentThinkingLevel.High,
+        "xhigh" => AgentThinkingLevel.XHigh,
+        "max" => AgentThinkingLevel.Max,
+        _ => AgentThinkingLevel.Off,
+    };
 }
 
 /// <summary>Default endpoint and model presets for common providers.</summary>
@@ -127,7 +220,8 @@ public sealed record AgentRunRequest(
     string Prompt,
     string WorkspacePath,
     IReadOnlyList<AgentHistoryTurn> History,
-    IReadOnlyList<AgentAttachment>? Images = null);
+    IReadOnlyList<AgentAttachment>? Images = null,
+    string? SessionFile = null);
 
 public enum AgentStopReason
 {
@@ -144,7 +238,7 @@ public abstract record AgentStreamEvent
     {
     }
 
-    public sealed record RunStarted(string SessionId, string Model) : AgentStreamEvent;
+    public sealed record RunStarted(string SessionId, string Model, string? SessionFile = null) : AgentStreamEvent;
 
     public sealed record TextDelta(string Delta) : AgentStreamEvent;
 
@@ -154,7 +248,7 @@ public abstract record AgentStreamEvent
 
     public sealed record ToolFinished(string CallId, string Name, string? Result, bool IsError, long? DurationMs) : AgentStreamEvent;
 
-    public sealed record RunCompleted(AgentStopReason StopReason, string? Error, long InputTokens, long OutputTokens, string? Model) : AgentStreamEvent;
+    public sealed record RunCompleted(AgentStopReason StopReason, string? Error, long InputTokens, long OutputTokens, string? Model, string? SessionFile = null) : AgentStreamEvent;
 
     public sealed record RunFailed(string Message) : AgentStreamEvent;
 }

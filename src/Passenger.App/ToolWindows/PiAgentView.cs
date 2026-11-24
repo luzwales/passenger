@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -14,8 +15,8 @@ using Passenger.Editor;
 
 namespace Passenger.App.ToolWindows;
 
-/// <summary>Docked Pi Agent panel: protocol/model switching, workspace-scoped file/folder/image attachments,
-/// streaming response &amp; tool execution feed, strictly confined to the open workspace folder.</summary>
+/// <summary>Docked Pi Agent panel: header title-row tools, collapsible workspace session sidebar,
+/// shared ~/.pi/agent/ history, and DSH-style composer bar with attach menu and model/thinking picker.</summary>
 public sealed class PiAgentView : DockPanel
 {
     private readonly PiAgentRuntime runtime;
@@ -23,35 +24,43 @@ public sealed class PiAgentView : DockPanel
     private readonly Func<bool> trustedProvider;
     private readonly ObservableCollection<ConversationItem> items = [];
     private readonly ObservableCollection<AgentAttachment> attachments = [];
-    private readonly ToolDropDown profileBox = new("Select model");
-    private readonly ToolDropDown protocolBox = new("Protocol");
-    private readonly TextBlock workspaceBadge = new() { Classes = { StyleClasses.Caption, StyleClasses.Muted }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly ObservableCollection<PiAgentSessionSummary> workspaceSessions = [];
+
+    private readonly ToggleButton sidebarToggle;
+    private readonly Button newSessionButton;
+    private readonly Button settingsButton;
+    private readonly Border sidebarFrame;
+    private readonly ListBox sessionList = new() { Classes = { StyleClasses.Tree } };
+    private readonly EmptyState sidebarEmpty = new("No sessions yet");
+    private readonly PaneSplit bodySplit;
+
     private readonly Banner trustNotice = new();
     private readonly ItemsControl feed = new() { Margin = new Thickness(Gaps.Normal) };
-    private readonly ScrollViewer feedScroll = new() { VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto };
+    private readonly ScrollViewer feedScroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly EmptyState empty = new("Ask Pi Agent about this workspace. Reads, searches, and edits stay inside the open folder.");
     private readonly ItemsControl attachmentStrip = new() { IsVisible = false };
     private readonly TextBox composer = new()
     {
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
-        MinHeight = 64,
+        MinHeight = 56,
         MaxHeight = 140,
         PlaceholderText = "Ask Pi Agent to inspect, explain, or edit files in this workspace…",
     };
-    private readonly Button attachFileButton;
-    private readonly Button attachFolderButton;
-    private readonly Button attachImageButton;
+
+    private readonly Button attachButton;
+    private readonly Button modelPickerButton = new() { Classes = { StyleClasses.Widget }, Focusable = false };
+    private readonly TextBlock modelPickerText = new() { Classes = { StyleClasses.Caption }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 150 };
     private readonly Button sendButton;
     private readonly Button stopButton;
-    private readonly Button newSessionButton;
-    private readonly Button settingsButton;
     private readonly TextBlock turnStatus = new() { Classes = { StyleClasses.Caption, StyleClasses.Muted }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
 
     private PiAgentConfig config = new PiAgentConfig { Models = [AgentModelProfile.Create(AgentProviderKind.OpenAI)] }.Clamped();
     private string sessionId = NewSessionId();
+    private string? activeSessionFile;
     private CancellationTokenSource? activeTurn;
-    private bool syncingSelectors;
+    private bool sidebarOpen;
+    private string? loadedWorkspace;
 
     public PiAgentView(PiAgentRuntime runtime, Func<string?> folderProvider, Func<bool> trustedProvider)
     {
@@ -59,54 +68,57 @@ public sealed class PiAgentView : DockPanel
         this.folderProvider = folderProvider;
         this.trustedProvider = trustedProvider;
 
-        profileBox.MaxDropDownHeight = 260;
-        protocolBox.MaxDropDownHeight = 200;
-        AutomationProperties.SetName(profileBox, "Agent Model");
-        AutomationProperties.SetName(protocolBox, "Agent Protocol");
         AutomationProperties.SetName(composer, "Pi Agent Prompt");
+        AutomationProperties.SetName(sessionList, "Workspace Sessions");
 
-        profileBox.SelectionChanged += (_, _) => OnProfileChanged();
-        protocolBox.SelectionChanged += (_, _) => OnProtocolChanged();
+        sidebarToggle = ToolButtons.Toggle(IconKeys.History, "Sessions Sidebar");
+        sidebarToggle.IsChecked = sidebarOpen;
+        sidebarToggle.Click += (_, _) => SetSidebarOpen(!sidebarOpen, notify: true);
 
-        ReusedRows.Use(profileBox, () =>
-        {
-            TextBlock label = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-            return label.Showing<AgentModelProfile>(p => label.Text = p.DisplayName);
-        });
-        ReusedRows.Use(protocolBox, () =>
-        {
-            TextBlock label = new() { VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-            return label.Showing<AgentProtocolOption>(p => label.Text = AgentProtocolCatalog.ShortLabel(p.Kind));
-        });
-        protocolBox.ItemsSource = AgentProtocolCatalog.All;
-
-        attachFileButton = ToolButtons.Small(IconKeys.DocumentText, "Attach File…", () => IdeErrors.Observe(PickFilesAsync()));
-        attachFolderButton = ToolButtons.Small(IconKeys.Explorer, "Attach Folder…", () => IdeErrors.Observe(PickFolderAsync()));
-        attachImageButton = ToolButtons.Small(IconKeys.Image, "Attach Image…", () => IdeErrors.Observe(PickImagesAsync()));
         newSessionButton = ToolButtons.Of(AppActions.PiAgentNewSession, IconKeys.Add, "New Session", action => ActionRequested?.Invoke(this, action));
         settingsButton = ToolButtons.Of(AppActions.PiAgentSettings, IconKeys.Settings, "Pi Agent Settings…", action => ActionRequested?.Invoke(this, action));
+        HeaderTools = new ShrinkingRow { Spacing = Gaps.Hair, Children = { sidebarToggle, newSessionButton, settingsButton } };
 
+        attachButton = ToolButtons.Of(IconKeys.Add, "Attach File, Folder, or Image", OpenAttachMenu);
+
+        PathIcon chevron = new() { Classes = { StyleClasses.Small } };
+        chevron.Bind(PathIcon.DataProperty, chevron.GetResourceObservable(IconKeys.ChevronDown));
+        modelPickerButton.Content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Gaps.Tight,
+            Children = { modelPickerText, chevron },
+        };
+        ToolButtons.Tip(modelPickerButton, "Select Provider, Model, and Thinking Level");
+        modelPickerButton.Click += (_, _) => OpenModelPickerMenu();
+
+        PathIcon sendIcon = new() { Classes = { StyleClasses.Small } };
+        sendIcon.Bind(PathIcon.DataProperty, sendIcon.GetResourceObservable(IconKeys.Send));
         sendButton = new Button
         {
-            Content = "Send",
             Classes = { StyleClasses.Primary },
+            Content = sendIcon,
+            Padding = new Thickness(Gaps.Normal, 0),
         };
-        AutomationProperties.SetName(sendButton, "Send Prompt");
+        ToolButtons.Tip(sendButton, "Send Prompt");
         sendButton.Click += (_, _) => IdeErrors.Observe(SendAsync());
 
+        PathIcon stopIcon = new() { Classes = { StyleClasses.Small } };
+        stopIcon.Bind(PathIcon.DataProperty, stopIcon.GetResourceObservable(IconKeys.Stop));
         stopButton = new Button
         {
-            Content = "Stop",
+            Content = stopIcon,
+            Padding = new Thickness(Gaps.Normal, 0),
             IsVisible = false,
         };
-        AutomationProperties.SetName(stopButton, "Stop Agent");
+        ToolButtons.Tip(stopButton, "Stop Agent");
         stopButton.Click += (_, _) => AbortCurrentTurn();
 
         composer.KeyDown += (_, e) =>
         {
-            if (e.Key == Key.Enter && (e.KeyModifiers == KeyModifiers.None || e.KeyModifiers.HasFlag(Keystroke.Command)))
+            if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             {
-                if (e.KeyModifiers != KeyModifiers.Shift)
+                if (e.KeyModifiers == KeyModifiers.None || e.KeyModifiers.HasFlag(Keystroke.Command))
                 {
                     e.Handled = true;
                     IdeErrors.Observe(SendAsync());
@@ -114,14 +126,28 @@ public sealed class PiAgentView : DockPanel
             }
         };
 
-        ToolFlow topFlow = new()
+        sessionList.ItemsSource = workspaceSessions;
+        ReusedRows.Use(sessionList, BuildSessionRow);
+        sessionList.SelectionChanged += (_, _) =>
         {
-            Margin = new Thickness(Gaps.Normal, Gaps.Tight),
-            Spacing = Gaps.Small,
-            Children = { profileBox, protocolBox, newSessionButton, settingsButton, workspaceBadge },
+            if (sessionList.SelectedItem is PiAgentSessionSummary chosen && !string.Equals(chosen.FilePath, activeSessionFile, StringComparison.OrdinalIgnoreCase))
+            {
+                OpenSession(chosen);
+            }
         };
-        Control topBar = ToolBars.Top(topFlow);
-        DockPanel.SetDock(topBar, Dock.Top);
+        ListMenus.Attach(sessionList, () => sessionList.SelectedItem is not PiAgentSessionSummary chosen ? [] :
+        [
+            ListMenus.Item("Open Session", () => OpenSession(chosen)),
+            ListMenus.Remove("Delete Session", () => DeleteSession(chosen)),
+        ]);
+
+        Panel sidebarHost = new() { Children = { sessionList, sidebarEmpty } };
+        sidebarFrame = new Border
+        {
+            Classes = { StyleClasses.Framed },
+            Margin = new Thickness(Gaps.Normal),
+            Child = sidebarHost,
+        };
 
         DockPanel.SetDock(trustNotice, Dock.Top);
 
@@ -134,16 +160,18 @@ public sealed class PiAgentView : DockPanel
         attachmentStrip.ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Panel?>(() => new ToolFlow { Spacing = Gaps.Tight });
         ReusedRows.Use(attachmentStrip, BuildAttachmentChip);
 
-        ToolFlow composerActions = new()
+        ToolFlow composerBar = new()
         {
-            Spacing = Gaps.Small,
-            Children = { attachFileButton, attachFolderButton, attachImageButton, sendButton, stopButton, turnStatus },
+            Spacing = Gaps.Tight,
+            Children = { attachButton, turnStatus, modelPickerButton, sendButton, stopButton },
         };
+        ToolFlow.SetFills(turnStatus, new ToolLayout.Fills(0));
+
         StackPanel composerBox = new()
         {
             Margin = new Thickness(Gaps.Normal),
             Spacing = Gaps.Small,
-            Children = { attachmentStrip, composer, composerActions },
+            Children = { attachmentStrip, composer, composerBar },
         };
         Border composerPanel = new()
         {
@@ -153,17 +181,27 @@ public sealed class PiAgentView : DockPanel
         };
         DockPanel.SetDock(composerPanel, Dock.Bottom);
 
-        Children.Add(topBar);
-        Children.Add(trustNotice);
-        Children.Add(composerPanel);
-        Children.Add(feedHost);
+        DockPanel chatPane = new() { LastChildFill = true };
+        chatPane.Children.Add(trustNotice);
+        chatPane.Children.Add(composerPanel);
+        chatPane.Children.Add(feedHost);
+
+        bodySplit = new PaneSplit(sidebarFrame, chatPane, "170,1,*", "150,1,*");
+        Children.Add(bodySplit);
 
         ApplyConfig(config, persist: false);
+        SetSidebarOpen(sidebarOpen, notify: false);
         RefreshWorkspaceState();
     }
 
+    public Control HeaderTools { get; }
+    public IReadOnlyList<AgentAttachment> Attachments => attachments;
+    public IReadOnlyList<PiAgentSessionSummary> Sessions => workspaceSessions;
+    public bool IsSidebarOpen => sidebarOpen;
+
     public event EventHandler<string>? ActionRequested;
     public event EventHandler<PiAgentConfig>? ConfigChanged;
+    public event EventHandler<bool>? SidebarToggled;
 
     public string? PromptDraft
     {
@@ -173,12 +211,78 @@ public sealed class PiAgentView : DockPanel
 
     public PiAgentConfig Config => config;
 
-    public IReadOnlyList<AgentAttachment> Attachments => attachments;
+    public void ApplyConfig(PiAgentConfig next, bool persist = false)
+    {
+        config = next.Clamped();
+        UpdateModelPickerLabel();
+        if (persist)
+        {
+            ConfigChanged?.Invoke(this, config);
+        }
+    }
+
+    public void SetSidebarOpen(bool open, bool notify = true)
+    {
+        sidebarOpen = open;
+        sidebarToggle.IsChecked = open;
+        sidebarFrame.IsVisible = open;
+        bodySplit.Divider.IsVisible = open;
+        if (bodySplit.ColumnDefinitions.Count >= 3)
+        {
+            bodySplit.ColumnDefinitions[0].Width = open ? new GridLength(170) : new GridLength(0);
+            bodySplit.ColumnDefinitions[1].Width = open ? new GridLength(1) : new GridLength(0);
+        }
+        if (bodySplit.RowDefinitions.Count >= 3)
+        {
+            bodySplit.RowDefinitions[0].Height = open ? new GridLength(150) : new GridLength(0);
+            bodySplit.RowDefinitions[1].Height = open ? new GridLength(1) : new GridLength(0);
+        }
+        if (notify)
+        {
+            SidebarToggled?.Invoke(this, open);
+        }
+    }
 
     public void SwitchProtocol(AgentProtocol protocol)
     {
-        protocolBox.SelectedItem = AgentProtocolCatalog.For(protocol);
-        OnProtocolChanged();
+        if (config.ActiveProvider is not { } activeProvider)
+        {
+            return;
+        }
+        List<AgentProviderEndpoint> list = [.. config.Providers];
+        int index = list.FindIndex(p => string.Equals(p.Id, activeProvider.Id, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            return;
+        }
+        list[index] = (list[index] with { Protocol = protocol }).Clamped();
+        ApplyConfig((config with { Providers = list }).Clamped(), persist: true);
+    }
+
+    public void SelectModel(string providerId, string modelEntryId) =>
+        ApplyConfig((config with { ActiveProviderId = providerId, ActiveModelEntryId = modelEntryId }).Clamped(), persist: true);
+
+    public void SetThinkingLevel(AgentThinkingLevel level)
+    {
+        if (config.ActiveProvider is not { } provider || config.ActiveModelEntry is not { } model)
+        {
+            return;
+        }
+        List<AgentProviderEndpoint> providers = [.. config.Providers];
+        int pIdx = providers.FindIndex(p => string.Equals(p.Id, provider.Id, StringComparison.Ordinal));
+        if (pIdx < 0)
+        {
+            return;
+        }
+        List<AgentModelEntry> models = [.. providers[pIdx].Models];
+        int mIdx = models.FindIndex(m => string.Equals(m.Id, model.Id, StringComparison.Ordinal));
+        if (mIdx < 0)
+        {
+            return;
+        }
+        models[mIdx] = models[mIdx] with { ThinkingLevel = level };
+        providers[pIdx] = (providers[pIdx] with { Models = models }).Clamped();
+        ApplyConfig((config with { Providers = providers }).Clamped(), persist: true);
     }
 
     public bool AttachPath(string path, bool folder = false, bool imageOnly = false)
@@ -192,33 +296,11 @@ public sealed class PiAgentView : DockPanel
         return attachments.Count > before;
     }
 
-    public void ApplyConfig(PiAgentConfig next, bool persist = false)
-    {
-        config = next.Clamped();
-        syncingSelectors = true;
-        try
-        {
-            profileBox.ItemsSource = config.Models.ToList();
-            AgentModelProfile? active = config.ActiveModel ?? config.Models.FirstOrDefault();
-            profileBox.SelectedItem = active;
-            protocolBox.SelectedItem = AgentProtocolCatalog.For(active?.Protocol ?? AgentProtocol.OpenAiCompatible);
-        }
-        finally
-        {
-            syncingSelectors = false;
-        }
-        if (persist)
-        {
-            ConfigChanged?.Invoke(this, config);
-        }
-    }
-
     public void RefreshWorkspaceState()
     {
         string? folder = folderProvider();
         bool hasFolder = !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder);
         bool trusted = hasFolder && trustedProvider();
-        workspaceBadge.Text = hasFolder ? Path.GetFileName(folder) : "No workspace";
         if (!hasFolder)
         {
             trustNotice.Say("Open a folder or solution to run Pi Agent inside that workspace.");
@@ -231,6 +313,17 @@ public sealed class PiAgentView : DockPanel
         {
             trustNotice.Say(null);
         }
+
+        string? canonical = hasFolder ? PathNames.Canonical(folder!) : null;
+        if (!string.Equals(loadedWorkspace, canonical, StringComparison.OrdinalIgnoreCase))
+        {
+            loadedWorkspace = canonical;
+            activeSessionFile = null;
+            sessionId = NewSessionId();
+            items.Clear();
+            empty.IsVisible = true;
+            IdeErrors.Observe(RefreshSessionsAsync(restoreLatest: true));
+        }
         UpdateComposerState();
     }
 
@@ -238,6 +331,8 @@ public sealed class PiAgentView : DockPanel
     {
         AbortCurrentTurn();
         sessionId = NewSessionId();
+        activeSessionFile = null;
+        sessionList.SelectedItem = null;
         items.Clear();
         attachments.Clear();
         attachmentStrip.IsVisible = false;
@@ -247,30 +342,141 @@ public sealed class PiAgentView : DockPanel
         UpdateComposerState();
     }
 
-    private void OnProfileChanged()
+    public async Task RefreshSessionsAsync(bool restoreLatest = false)
     {
-        if (syncingSelectors || profileBox.SelectedItem is not AgentModelProfile selected)
+        string? folder = folderProvider();
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+        {
+            workspaceSessions.Clear();
+            sidebarEmpty.IsVisible = true;
+            return;
+        }
+        IReadOnlyList<PiAgentSessionSummary> list = await PiAgentSessionStore.ListAsync(folder);
+        if (!string.Equals(loadedWorkspace, PathNames.Canonical(folder), StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
-        PiAgentConfig updated = (config with { ActiveModelId = selected.Id }).Clamped();
-        ApplyConfig(updated, persist: true);
+        workspaceSessions.Clear();
+        foreach (PiAgentSessionSummary item in list)
+        {
+            workspaceSessions.Add(item);
+        }
+        sidebarEmpty.IsVisible = workspaceSessions.Count == 0;
+
+        if (restoreLatest && activeSessionFile is null && items.Count == 0 && workspaceSessions.Count > 0)
+        {
+            OpenSession(workspaceSessions[0]);
+        }
+        else if (activeSessionFile is not null)
+        {
+            PiAgentSessionSummary? match = workspaceSessions.FirstOrDefault(s => string.Equals(s.FilePath, activeSessionFile, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                sessionList.SelectedItem = match;
+            }
+        }
     }
 
-    private void OnProtocolChanged()
+    public void OpenSession(PiAgentSessionSummary summary)
     {
-        if (syncingSelectors || protocolBox.SelectedItem is not AgentProtocolOption chosen || config.ActiveModel is not { } active)
+        AbortCurrentTurn();
+        sessionId = summary.Id;
+        activeSessionFile = summary.FilePath;
+        items.Clear();
+        foreach (PiAgentMessageRecord record in PiAgentSessionStore.LoadTranscript(summary.FilePath, folderProvider()))
+        {
+            ConversationRole role = record.Kind switch
+            {
+                PiAgentMessageKind.User => ConversationRole.User,
+                PiAgentMessageKind.Tool => ConversationRole.Tool,
+                _ => ConversationRole.Assistant,
+            };
+            ConversationItem item = new(role, record.Title, record.Body);
+            if (!string.IsNullOrEmpty(record.Thinking))
+            {
+                item.AppendThinking(record.Thinking);
+            }
+            items.Add(item);
+        }
+        empty.IsVisible = items.Count == 0;
+        turnStatus.Text = summary.Title;
+        sessionList.SelectedItem = summary;
+        ScrollToEnd();
+        UpdateComposerState();
+    }
+
+    private void DeleteSession(PiAgentSessionSummary summary)
+    {
+        if (!PiAgentSessionStore.DeleteSession(summary.FilePath))
         {
             return;
         }
-        List<AgentModelProfile> list = [.. config.Models];
-        int index = list.FindIndex(m => m.Id == active.Id);
-        if (index < 0)
+        workspaceSessions.Remove(summary);
+        sidebarEmpty.IsVisible = workspaceSessions.Count == 0;
+        if (string.Equals(activeSessionFile, summary.FilePath, StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            StartNewSession();
         }
-        list[index] = (list[index] with { Protocol = chosen.Kind }).Clamped();
-        ApplyConfig((config with { Models = list, ActiveModelId = active.Id }).Clamped(), persist: true);
+    }
+
+    private void OpenAttachMenu()
+    {
+        ContextMenu menu = new() { Placement = PlacementMode.TopEdgeAlignedLeft };
+        menu.Items.Add(ListMenus.Item("Attach File…", () => IdeErrors.Observe(PickFilesAsync()), icon: IconKeys.DocumentText));
+        menu.Items.Add(ListMenus.Item("Attach Folder…", () => IdeErrors.Observe(PickFolderAsync()), icon: IconKeys.Explorer));
+        menu.Items.Add(ListMenus.Item("Attach Image…", () => IdeErrors.Observe(PickImagesAsync()), icon: IconKeys.Image));
+        menu.Open(attachButton);
+    }
+
+    private void OpenModelPickerMenu()
+    {
+        ContextMenu menu = new() { Placement = PlacementMode.TopEdgeAlignedRight };
+        AgentProviderEndpoint? activeProvider = config.ActiveProvider;
+        AgentModelEntry? activeModel = config.ActiveModelEntry;
+
+        menu.Items.Add(ListMenus.Heading("Models"));
+        foreach (AgentProviderEndpoint provider in config.Providers)
+        {
+            foreach (AgentModelEntry model in provider.Models)
+            {
+                bool current = activeProvider?.Id == provider.Id && activeModel?.Id == model.Id;
+                string label = $"{provider.DisplayName} · {model.DisplayName} ({AgentThinkingCatalog.Label(model.ThinkingLevel)})";
+                string pId = provider.Id;
+                string mId = model.Id;
+                menu.Items.Add(ListMenus.Toggle(label, current, _ => SelectModel(pId, mId)));
+            }
+        }
+
+        if (activeModel is not null)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(ListMenus.Heading("Thinking Level"));
+            foreach (AgentThinkingLevel level in AgentThinkingCatalog.All)
+            {
+                AgentThinkingLevel target = level;
+                menu.Items.Add(ListMenus.Toggle(
+                    AgentThinkingCatalog.Label(level),
+                    activeModel.ThinkingLevel == level,
+                    _ => SetThinkingLevel(target)));
+            }
+        }
+
+        menu.Items.Add(new Separator());
+        menu.Items.Add(ListMenus.Item("Configure Endpoints & Models…", () => ActionRequested?.Invoke(this, AppActions.PiAgentSettings), icon: IconKeys.Settings));
+        menu.Open(modelPickerButton);
+    }
+
+    private void UpdateModelPickerLabel()
+    {
+        if (config.ActiveProvider is { } provider && config.ActiveModelEntry is { } model)
+        {
+            string think = model.ThinkingLevel == AgentThinkingLevel.Off ? string.Empty : $" · {AgentThinkingCatalog.Label(model.ThinkingLevel)}";
+            modelPickerText.Text = $"{provider.DisplayName} · {model.DisplayName}{think}";
+        }
+        else
+        {
+            modelPickerText.Text = "Configure Model";
+        }
     }
 
     private async Task PickFilesAsync()
@@ -413,7 +619,7 @@ public sealed class PiAgentView : DockPanel
         UpdateComposerState();
         turnStatus.Text = "Running…";
 
-        AgentRunRequest request = new(sessionId, composedPrompt, folder, history, sentImages);
+        AgentRunRequest request = new(sessionId, composedPrompt, folder, history, sentImages, activeSessionFile);
         Dictionary<string, ConversationItem> toolCards = new(StringComparer.Ordinal);
         try
         {
@@ -421,6 +627,9 @@ public sealed class PiAgentView : DockPanel
             {
                 switch (ev)
                 {
+                    case AgentStreamEvent.RunStarted startedRun when !string.IsNullOrWhiteSpace(startedRun.SessionFile):
+                        activeSessionFile = startedRun.SessionFile;
+                        break;
                     case AgentStreamEvent.ThinkingDelta thinking:
                         assistant.AppendThinking(thinking.Delta);
                         break;
@@ -441,6 +650,10 @@ public sealed class PiAgentView : DockPanel
                         ScrollToEnd();
                         break;
                     case AgentStreamEvent.RunCompleted done:
+                        if (!string.IsNullOrWhiteSpace(done.SessionFile))
+                        {
+                            activeSessionFile = done.SessionFile;
+                        }
                         if (!string.IsNullOrWhiteSpace(done.Error))
                         {
                             assistant.AppendBody((assistant.Body.Length > 0 ? "\n\n" : string.Empty) + done.Error);
@@ -462,6 +675,7 @@ public sealed class PiAgentView : DockPanel
             activeTurn = null;
             UpdateComposerState();
             ScrollToEnd();
+            await RefreshSessionsAsync(restoreLatest: false);
         }
     }
 
@@ -482,9 +696,7 @@ public sealed class PiAgentView : DockPanel
         sendButton.IsEnabled = !running && hasFolder;
         stopButton.IsVisible = running;
         stopButton.IsEnabled = running;
-        attachFileButton.IsEnabled = !running && hasFolder;
-        attachFolderButton.IsEnabled = !running && hasFolder;
-        attachImageButton.IsEnabled = !running && hasFolder;
+        attachButton.IsEnabled = !running && hasFolder;
     }
 
     private List<AgentHistoryTurn> BuildHistory()
@@ -505,6 +717,22 @@ public sealed class PiAgentView : DockPanel
     }
 
     private void ScrollToEnd() => UiThread.Post(() => feedScroll.ScrollToEnd());
+
+    private Control BuildSessionRow()
+    {
+        TextBlock title = new() { Classes = { StyleClasses.Strong, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
+        TextBlock detail = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
+        return new StackPanel
+        {
+            Spacing = Gaps.Hair,
+            Margin = new Thickness(Gaps.Small, Gaps.Tight),
+            Children = { title, detail },
+        }.Showing<PiAgentSessionSummary>(summary =>
+        {
+            title.Text = summary.Title;
+            detail.Text = $"{summary.Modified.LocalDateTime:MM-dd HH:mm} · {summary.MessageCount} msg";
+        });
+    }
 
     private Control BuildAttachmentChip()
     {
