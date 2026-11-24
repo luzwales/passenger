@@ -405,6 +405,9 @@ public static class AppActions
     // The Step Library window over the folder's step definitions, and Insert Step into Feature of the one chosen there: no
     // keys of Rider's.
     public const string ShowStepLibrary = "app.showStepLibrary";
+    public const string ShowPiAgent = "app.showPiAgent";
+    public const string PiAgentNewSession = "app.piAgent.newSession";
+    public const string PiAgentSettings = "app.piAgent.settings";
     public const string InsertStep = "app.steps.insert";
 
     // Rider's ReformatWithPrettierAction (its Visual Studio keymaps give its keys to VcsShowPrevChangeMarker) and

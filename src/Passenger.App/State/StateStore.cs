@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Passenger.App.Agent;
 using Passenger.App.CSharp;
 using Passenger.App.Debugging;
 using Passenger.App.Docking;
@@ -51,6 +52,7 @@ public sealed class StateStore
         Dotnet = new(Path.Combine(root, "dotnet.json"));
         Trust = new(Path.Combine(root, "trust.json"));
         Templates = new(Path.Combine(root, TemplatesFile));
+        PiAgent = new(Path.Combine(root, "piAgent.json"));
         // Before this process writes any: a change is written a moment after it is made, and only through this store.
         UsedBefore = new[] { Path.Combine(root, SettingsFile), Layout.Path, Recent.Path, Updates.Path }.Any(File.Exists)
             || Directory.Exists(Path.Combine(root, "workspaces"));
@@ -170,6 +172,9 @@ public sealed class StateStore
     /// <summary>The templates New Solution and New Project made something from lately, which their lists show first.</summary>
     public StateDocument<Passenger.App.Templates.RecentTemplatesState> Templates { get; }
 
+    /// <summary>The Pi Agent's model profiles, active model, and sampling settings.</summary>
+    public StateDocument<PiAgentState> PiAgent { get; }
+
     /// <summary>A folder's own documents, held for a window that has the folder open or is opening it until it lets them go
     /// (<see cref="LetGo"/>); every window holding the folder shares them.</summary>
     public ProjectState Hold(string folder)
@@ -216,6 +221,7 @@ public sealed class StateStore
         Dotnet.Flush();
         Trust.Flush();
         Templates.Flush();
+        PiAgent.Flush();
         foreach ((ProjectState documents, _) in projects.Values)
         {
             documents.Flush();

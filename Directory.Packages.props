@@ -162,6 +162,9 @@
          solution's documents, held to each workspace apart. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.4.0" />
+    <!-- The Pi coding agent runtime (Passenger.Agent): in-process AI agent with workspace tools and multi-protocol LLM streaming. -->
+    <PackageVersion Include="Pi.Agent" Version="1.4.4" />
+    <PackageVersion Include="Pi.CodingAgent" Version="1.4.4" />
     <!-- The NuGet window's package sources, read by NuGet's own code, so they match the CLI's. -->
     <PackageVersion Include="NuGet.Configuration" Version="8.0.0" />
     <PackageVersion Include="StreamJsonRpc" Version="2.26.150" />

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- In-process Pi coding agent runtime: multi-protocol LLM streaming (Anthropic, OpenAI Responses, OpenAI Compatible)
+       and workspace-scoped tools bounded to the trusted open folder. No Avalonia, so the boundary stays UI-free. -->
+  <PropertyGroup>
+    <RootNamespace>Passenger.Agent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pi.Agent" />
+    <PackageReference Include="Pi.CodingAgent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
+    <ProjectReference Include="../Passenger.Text/Passenger.Text.csproj" />
+    <ProjectReference Include="../Passenger.Workspace/Passenger.Workspace.csproj" />
+  </ItemGroup>
+</Project>

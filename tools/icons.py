@@ -162,6 +162,11 @@ ICONS = [
     ("DesktopApp", "Window Apps", "20_regular"),
     ("ClassLibrary", "Library", "20_regular"),
     ("SharedProject", "Folder Link", "20_regular"),
+    # The Pi Agent tool window's stripe button, its attachments, protocol test and message send.
+    ("PiAgent", "Pi", "20_regular"),
+    ("AttachFile", "Attach", "16_regular"),
+    ("Image", "Image", "16_regular"),
+    ("Send", "Send", "16_regular"),
 ]
 
 # Resource key, then two icons (folder and size and style, as above) whose parts make it: the first's shape outside its

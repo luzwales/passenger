@@ -80,6 +80,7 @@ public partial class MainWindow
             // Each preview runs the project's build, or said why it drew nothing: it starts again as the trust now stands.
             RestartPreviews(null);
             UpdateStatus();
+            FollowPiAgentWorkspace();
         }
         ShowTrust();
     }

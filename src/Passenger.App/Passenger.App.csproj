@@ -94,6 +94,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Passenger.Agent/Passenger.Agent.csproj" />
     <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
     <ProjectReference Include="../Passenger.Editor/Passenger.Editor.csproj" />
     <ProjectReference Include="../Passenger.Languages/Passenger.Languages.csproj" />

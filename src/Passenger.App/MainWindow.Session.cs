@@ -325,6 +325,7 @@ public partial class MainWindow
         gameAudio?.Bind(next);
         BindVcs(next);
         BindBookmarks(next);
+        FollowPiAgentWorkspace();
         BindGamePane(next);
         BindErrorPins(next);
         BindStepRuns(next);

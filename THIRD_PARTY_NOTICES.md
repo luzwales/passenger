@@ -74,6 +74,11 @@ out; dbgshim's musl Linux natives are the container tools' (below), which the ap
 | `ZLinq` | the debugger's queries | MIT | © Cysharp, Inc. |
 | `Velopack` | the Windows install's hooks, which register and remove the file types Passenger opens as it is installed, updated and uninstalled, and its updates: the UpdateManager that downloads a newer release's package from its feed and checks its size and SHA-256 | MIT | Copyright © Velopack Ltd. All rights reserved. |
 | `vpk` | in the Windows installer, Velopack's own programs, written in Rust with open-source crates: `Setup.exe` (the installer itself), and in the install `Update.exe` (which installs an update once Passenger has closed, and uninstalls it from Settings > Apps) and a `Passenger.exe` that starts `current\Passenger.exe` | MIT | Copyright © Velopack Ltd. All rights reserved. |
+| `Pi.CodingAgent`, `Pi.Agent`, `Pi.Ai`, `Pi.Chord`, `Pi.Client`, `Pi.Codemode`, `Pi.Durable`, `Pi.Mcp`, `Pi.Protocol`, `Pi.Server`, `Pi.Telemetry`, `Pi.Tui` | the Pi Agent runtime (`Passenger.Agent`), multi-protocol LLM streaming and coding-agent session execution | MIT | Copyright (c) 2025 Mario Zechner (upstream Pi); .NET port Copyright (c) 2026 xuzeyu |
+| `DiffPlex` | Pi.CodingAgent's file diffing | Apache-2.0 | no copyright line; its authors: Matthew Manela |
+| `Jint` | Pi.Codemode's JavaScript interpreter | BSD-2-Clause | Sebastien Ros |
+| `Acornima` | Jint's JavaScript parser | BSD-3-Clause | Adam Simon |
+| `Microsoft.Data.Sqlite` | Pi.Durable's SQLite dependency | MIT | © Microsoft Corporation. All rights reserved. |
 
 ### Inside `roslyn/`
 

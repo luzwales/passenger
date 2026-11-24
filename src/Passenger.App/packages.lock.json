@@ -223,6 +223,11 @@
         "resolved": "1.2.161",
         "contentHash": "OpHNacIumnkhaaX3ZlQ/TCR4YPOJvud2/PAOoWb6o+mIrLwIVA275I5wAgt4q/1O2VrJeDwR1qFQyqzG4lUArg=="
       },
+      "Acornima": {
+        "type": "Transitive",
+        "resolved": "1.7.0",
+        "contentHash": "a2I4O4qkuAdB0oSaGz6/k0n/bXxMbGcLBra5dNTTVSLmTwM7uORA8ebpOrNMmDfFWOMwvuaRL6gPprRV4HTV0w=="
+      },
       "Avalonia.Angle.Windows.Natives": {
         "type": "Transitive",
         "resolved": "2.1.27548.20260419",
@@ -308,6 +313,11 @@
         "resolved": "29.0.1",
         "contentHash": "R2oo/wR3mXrbdK04Yraf+KhB01f/lyBkLQZcdxYt9XKE6tV+Af45MEk+jfbsew1SVvrAO0WvkIRwGYUozKCJvQ=="
       },
+      "DiffPlex": {
+        "type": "Transitive",
+        "resolved": "1.9.0",
+        "contentHash": "Z4IDEH6iOb6d+Y2QUjsbq1Fp5I/kwZzNdr/evBTbCGq+ShAjE4baLm7lX1tfjV2p34QI3V9kctCQziFuuKqeCA=="
+      },
       "ExCSS": {
         "type": "Transitive",
         "resolved": "4.3.1",
@@ -346,6 +356,14 @@
         "resolved": "14.4.0.200",
         "contentHash": "lCY77jIIBi1nDne3V0OEDanbCTxxdDbeaR+cXD1/k9MuyfFXy7MLPGbi4iXvVhV1LBBAV/sWLR1wbqSNOedbiQ=="
       },
+      "Jint": {
+        "type": "Transitive",
+        "resolved": "4.17.0",
+        "contentHash": "9jdpLQQYsWTjOn2THpiR8zRJ34ksV6ofW0gJvZxJW/fIGK+A+TkpWonhuuLDRwqLDjP+9WsxYt2MEge6lWjk2A==",
+        "dependencies": {
+          "Acornima": "1.7.0"
+        }
+      },
       "MessagePack": {
         "type": "Transitive",
         "resolved": "2.5.307",
@@ -381,6 +399,24 @@
         "contentHash": "0C7o9ys497xp0kZ64sL7C6nY/5WPQlxia28VlezdonBmjxbC6mIovAYs8mBoh/QooxBBZQCo/wMuZnV1kNk9GA==",
         "dependencies": {
           "Microsoft.CodeAnalysis.Analyzers": "5.9.0"
+        }
+      },
+      "Microsoft.Data.Sqlite": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "w37nz3WFmDtRfXxWEwIXX2OgqDRiwhD1JGbFwfpFCF8GkCrV/yO6Y2JF5058J2RGoI2sCcdn02wrk0yEcekWcw==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.13",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.core": "2.1.13"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "Gge8XsSCOwcbkbdmt2UDAe6kIv9Q0vA6yb3wsTStjjexaMFLTWfc/1gH4kbhJ+zWiXRTRA4lG2sOQNVfir204w==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
         }
       },
       "Microsoft.Extensions.AI.Abstractions": {
@@ -471,6 +507,79 @@
         "resolved": "8.0.0",
         "contentHash": "5VyDHYGLwVzctCB0ndqOBLUPKfBKtx7YVkGIGxCQja5LFLKWaeagrKbWQeO28SIkocBrF5fFkGkoZ6FwqzJvww=="
       },
+      "Pi.Ai": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "Nmc8RFOIsrl4cz/k44xTj/xtKDtfUgSYGaOeqep0aT0YyHC/a2kxwrNImkWM9er+cBCLHw3AzfKhBwHXPxX5yw==",
+        "dependencies": {
+          "Pi.Telemetry": "1.4.4"
+        }
+      },
+      "Pi.Chord": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "X3oyDhtKUT/5bLHFG8PbqOtjCrPihB/KOmxNJOz8J7Dfk1yLY+h149++Kehxb5ki7PPT6zRVYmFEt7Hy0cbm1w=="
+      },
+      "Pi.Client": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "9zo5KNKYUZQQPHrW84vP9WXyynONuJITqU705t2wdjtXJdUB3L7d2pjYh5ig0NOurnzmL/QPoUPipiYlBCkwkQ==",
+        "dependencies": {
+          "Pi.Chord": "1.4.4",
+          "Pi.Protocol": "1.4.4"
+        }
+      },
+      "Pi.Codemode": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "cDZBHF+NdBScIyre27rzZSwZvpZoqIZ2Gmy3ZhKJTDhaiRiQHswS9RXvlGR7zBSwKyi0c62b3D2/DEtAtDdr6w==",
+        "dependencies": {
+          "Jint": "4.17.0"
+        }
+      },
+      "Pi.Durable": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "Z4u8OpYmfImA6A1ICSg3S++UUHCwsH8hT4V4o/VgkW5KMKFT4O0AsOd8DwmKsjadJl63sJxmjeMnt3vL/igiTA==",
+        "dependencies": {
+          "DiffPlex": "1.9.0",
+          "Microsoft.Data.Sqlite": "10.0.13",
+          "Pi.Ai": "1.4.4",
+          "Pi.Chord": "1.4.4"
+        }
+      },
+      "Pi.Mcp": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "UVj6vhGxBIsin4l9pSzdOY90Wk8tTLED6qIIepuiZzVM2vlp5jrrHzGEt4V3DPC5UCQZzBT9gtHr17zR7EJVwA=="
+      },
+      "Pi.Protocol": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "U8WtcbrPlrFMC+jRjr01PDZ9AuwrWart85EAAdj6XLc5CJTxzz7IiddeWdlnhae4opmHLUPic4VmMuuGwSVbEg==",
+        "dependencies": {
+          "Pi.Chord": "1.4.4"
+        }
+      },
+      "Pi.Server": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "DOwvecjBr7uk9a6n51AwOxeLSOFZ1ntC3mmnHUF42C8uo68PMGicp8F8ilbHzVWAVx+Vd0KERlopCqn6OTN7lQ==",
+        "dependencies": {
+          "Pi.Chord": "1.4.4",
+          "Pi.Protocol": "1.4.4"
+        }
+      },
+      "Pi.Telemetry": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "OU1MIOTCUq7hJ1fDVigEID5V7XZ6Y/UayBvCskB/alt9WX2aRLT48t1H/Cd7GCSa0EBmoS08v+9+HF1TgyrmCw=="
+      },
+      "Pi.Tui": {
+        "type": "Transitive",
+        "resolved": "1.4.4",
+        "contentHash": "J/j7gKbykGipfZgHnh6BxrZGkX1GwhpEowre7Ke0ww2Nus6YxNWuc4b86TQc5vv01h9szCzVv6IPdMYP6aZF6g=="
+      },
       "PolyType": {
         "type": "Transitive",
         "resolved": "1.4.1",
@@ -495,6 +604,33 @@
         "type": "Transitive",
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "NlDixlC7uHmo+ojXRgkNvN0tQtVGpLDZ3x2OpgNj+G07VHh5cXSszFDrAiC4BpUiPwkcaeuQkMV9WQ123xVtmQ==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.13",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.13"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "2joofoinuHBFs0nMX3nKuXgxpXryRkCOdM2Ua6HBqQLLy6IW+5f28ZI+HAvMyF8vG7XfNz/lwfBfE6V4juru8Q=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "ZU60dSqoSNRe49KcQDUmOVgdRtjITOssVXFtiISs+zJXDI4D2Sndwpn2NOtzDQNPu0ZAvpoLPQ+GLKv6iEZn8Q==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.13"
+        }
       },
       "Svg.Animation": {
         "type": "Transitive",
@@ -556,6 +692,21 @@
         "type": "Transitive",
         "resolved": "0.94.1",
         "contentHash": "11YMr7FnAbL83bQmVxlhbIKHvSLxjO81D12Ej0QMSGXMDTxNA9MTOa4MQxx43nv5el/efuPHwzyrj6a5ha2gug=="
+      },
+      "YamlDotNet": {
+        "type": "Transitive",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
+      },
+      "passenger.agent": {
+        "type": "Project",
+        "dependencies": {
+          "Passenger.Core": "[0.4.2, )",
+          "Passenger.Text": "[0.4.2, )",
+          "Passenger.Workspace": "[0.4.2, )",
+          "Pi.Agent": "[1.4.4, )",
+          "Pi.CodingAgent": "[1.4.4, )"
+        }
       },
       "passenger.core": {
         "type": "Project",
@@ -704,6 +855,37 @@
           "Microsoft.Diagnostics.NETCore.Client": "0.2.661903"
         }
       },
+      "Pi.Agent": {
+        "type": "CentralTransitive",
+        "requested": "[1.4.4, )",
+        "resolved": "1.4.4",
+        "contentHash": "QY1CdcFrc4lsGl4D2jCovzgK4U8taTSzhgVfNQDWgCp9tz4faofPNVmskyaN6Iuql/XOvD8ZO/p5EtP65zeubw==",
+        "dependencies": {
+          "Pi.Ai": "1.4.4"
+        }
+      },
+      "Pi.CodingAgent": {
+        "type": "CentralTransitive",
+        "requested": "[1.4.4, )",
+        "resolved": "1.4.4",
+        "contentHash": "aa8CM2xoLYmXa+bZj3qJWEe0d1jmn/uAjUy60y+FLAE0fh8Wi3Be6I7lF0XEtu5H8fBJ2sjhrjDGdIR6NcIjqA==",
+        "dependencies": {
+          "DiffPlex": "1.9.0",
+          "Jint": "4.17.0",
+          "Pi.Agent": "1.4.4",
+          "Pi.Ai": "1.4.4",
+          "Pi.Chord": "1.4.4",
+          "Pi.Client": "1.4.4",
+          "Pi.Codemode": "1.4.4",
+          "Pi.Durable": "1.4.4",
+          "Pi.Mcp": "1.4.4",
+          "Pi.Protocol": "1.4.4",
+          "Pi.Server": "1.4.4",
+          "Pi.Tui": "1.4.4",
+          "SkiaSharp": "4.153.1",
+          "YamlDotNet": "18.1.0"
+        }
+      },
       "Porta.Pty": {
         "type": "CentralTransitive",
         "requested": "[2.2.4, )",
@@ -788,6 +970,11 @@
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
       },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
       "Porta.Pty": {
         "type": "CentralTransitive",
         "requested": "[2.2.4, )",
@@ -848,6 +1035,11 @@
         "type": "Transitive",
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
       },
       "Porta.Pty": {
         "type": "CentralTransitive",
@@ -910,6 +1102,11 @@
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
       },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
       "Porta.Pty": {
         "type": "CentralTransitive",
         "requested": "[2.2.4, )",
@@ -970,6 +1167,11 @@
         "type": "Transitive",
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
       },
       "Porta.Pty": {
         "type": "CentralTransitive",
@@ -1032,6 +1234,11 @@
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
       },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
       "Porta.Pty": {
         "type": "CentralTransitive",
         "requested": "[2.2.4, )",
@@ -1092,6 +1299,11 @@
         "type": "Transitive",
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
       },
       "Porta.Pty": {
         "type": "CentralTransitive",
@@ -1154,6 +1366,11 @@
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
       },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
+      },
       "Porta.Pty": {
         "type": "CentralTransitive",
         "requested": "[2.2.4, )",
@@ -1214,6 +1431,11 @@
         "type": "Transitive",
         "resolved": "4.157.0",
         "contentHash": "tP54cTnPqGrzf2pBcyupMZWdIUjV34ELdKuh3/c329kRQF4UCVLZvilQZrDMqPJ9P/+AUJC8kDRMBgT/jBvYug=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.13",
+        "contentHash": "D2UAuiGxFYBqeRXjjjGgvJ5UQifzn6wefmSqeKU7XcNGKLbJRP6X7kcPZ6opOBJGdCIlgbSxTvDpBbLvsN594A=="
       },
       "Porta.Pty": {
         "type": "CentralTransitive",
