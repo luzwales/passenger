@@ -10,6 +10,7 @@ using Avalonia.Platform.Storage;
 using Passenger.Agent;
 using Passenger.App.Agent;
 using Passenger.App.Docking;
+using Passenger.App.Editors;
 using Passenger.App.Settings;
 using Passenger.Core;
 using Passenger.Editor;
@@ -17,13 +18,14 @@ using Passenger.Editor;
 namespace Passenger.App.ToolWindows;
 
 /// <summary>Docked Pi Agent panel: header title-row tools, collapsible workspace session sidebar,
-/// shared ~/.pi/agent/ history, and DSH-style composer bar with attach menu and model/thinking picker.</summary>
+/// shared ~/.pi/agent/ history, Markdown assistant cards, and DSH-style composer bar.</summary>
 public sealed class PiAgentView : DockPanel
 {
     private readonly PiAgentRuntime runtime;
     private readonly Func<string?> folderProvider;
     private readonly Func<bool> trustedProvider;
     private readonly PopupHost? popups;
+    private readonly Action<Uri>? browse;
     private readonly ObservableCollection<ConversationItem> items = [];
     private readonly ObservableCollection<AgentAttachment> attachments = [];
     private readonly ObservableCollection<PiAgentSessionSummary> workspaceSessions = [];
@@ -64,12 +66,13 @@ public sealed class PiAgentView : DockPanel
     private bool sidebarOpen;
     private string? loadedWorkspace;
 
-    public PiAgentView(PiAgentRuntime runtime, Func<string?> folderProvider, Func<bool> trustedProvider, PopupHost? popups = null)
+    public PiAgentView(PiAgentRuntime runtime, Func<string?> folderProvider, Func<bool> trustedProvider, PopupHost? popups = null, Action<Uri>? browse = null)
     {
         this.runtime = runtime;
         this.folderProvider = folderProvider;
         this.trustedProvider = trustedProvider;
         this.popups = popups;
+        this.browse = browse;
 
         AutomationProperties.SetName(composer, "Pi Agent Prompt");
         AutomationProperties.SetName(sessionList, "Workspace Sessions");
@@ -682,12 +685,14 @@ public sealed class PiAgentView : DockPanel
                         {
                             assistant.AppendBody((assistant.Body.Length > 0 ? "\n\n" : string.Empty) + done.Error);
                         }
+                        assistant.FlushMarkdown();
                         turnStatus.Text = done.StopReason == AgentStopReason.Aborted
                             ? "Stopped"
                             : $"{done.Model} · {done.InputTokens}+{done.OutputTokens} tok";
                         break;
                     case AgentStreamEvent.RunFailed failed:
                         assistant.AppendBody((assistant.Body.Length > 0 ? "\n\n" : string.Empty) + "Error: " + failed.Message);
+                        assistant.FlushMarkdown();
                         turnStatus.Text = "Failed";
                         break;
                 }
@@ -695,6 +700,7 @@ public sealed class PiAgentView : DockPanel
         }
         finally
         {
+            assistant.FlushMarkdown();
             activeTurn.Dispose();
             activeTurn = null;
             UpdateComposerState();
@@ -783,12 +789,13 @@ public sealed class PiAgentView : DockPanel
         return chip.Showing<AgentAttachment>(attachment => label.Text = attachment.DisplayPath);
     }
 
-    private static Control BuildConversationCard()
+    private Control BuildConversationCard()
     {
         TextBlock title = new() { Classes = { StyleClasses.Strong, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
         TextBlock thinking = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextWrapping = TextWrapping.Wrap, IsVisible = false };
-        TextBlock body = new() { TextWrapping = TextWrapping.Wrap };
-        StackPanel bodyStack = new() { Spacing = Gaps.Tight, Children = { title, thinking, body } };
+        TextBlock plainBody = new() { TextWrapping = TextWrapping.Wrap };
+        StackPanel markdownBody = new() { Spacing = Gaps.Small, IsVisible = false };
+        StackPanel bodyStack = new() { Spacing = Gaps.Tight, Children = { title, thinking, plainBody, markdownBody } };
         Border card = new()
         {
             BorderThickness = Hairlines.Round,
@@ -799,14 +806,63 @@ public sealed class PiAgentView : DockPanel
         card.Bind(Border.BorderBrushProperty, card.GetResourceObservable(TokenKeys.PopupBorder));
         card.Bind(Border.BackgroundProperty, card.GetResourceObservable(TokenKeys.List));
         card.Bind(Border.CornerRadiusProperty, card.GetResourceObservable(TokenKeys.ControlRadius));
+
+        Action<Uri> follow = uri => browse?.Invoke(uri);
+        ConversationItem? boundItem = null;
+        int renderedRevision = -1;
+
+        void SyncMarkdown()
+        {
+            if (boundItem is null || boundItem.Role != ConversationRole.Assistant)
+            {
+                return;
+            }
+            if (renderedRevision == boundItem.MarkdownRevision)
+            {
+                return;
+            }
+            renderedRevision = boundItem.MarkdownRevision;
+            markdownBody.Children.Clear();
+            string text = boundItem.Body;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                IReadOnlyList<Markdown.Block> blocks = Markdown.Parse(text);
+                Markdown.Render(blocks, markdownBody, follow);
+            }
+            markdownBody.IsVisible = markdownBody.Children.Count > 0;
+        }
+
+        void OnItemPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(ConversationItem.MarkdownRevision))
+            {
+                SyncMarkdown();
+            }
+        }
+
         return card.Showing<ConversationItem>(item =>
         {
+            if (boundItem is not null)
+            {
+                boundItem.PropertyChanged -= OnItemPropertyChanged;
+            }
+            boundItem = item;
+            renderedRevision = -1;
+            boundItem.PropertyChanged += OnItemPropertyChanged;
+
             title.DataContext = item;
-            body.Classes.Set(StyleClasses.Code, item.Role == ConversationRole.Tool);
+            bool isAssistant = item.Role == ConversationRole.Assistant;
+            plainBody.IsVisible = !isAssistant;
+            plainBody.Classes.Set(StyleClasses.Code, item.Role == ConversationRole.Tool);
             title.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Title)));
-            body.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Body)));
+            plainBody.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Body)));
             thinking.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Thinking)));
             thinking.Bind(IsVisibleProperty, new Avalonia.Data.Binding(nameof(ConversationItem.HasThinking)));
+            markdownBody.IsVisible = isAssistant && !string.IsNullOrWhiteSpace(item.Body);
+            if (isAssistant)
+            {
+                SyncMarkdown();
+            }
         });
     }
 
@@ -819,13 +875,27 @@ public sealed class PiAgentView : DockPanel
         Tool,
     }
 
-    private sealed class ConversationItem(ConversationRole role, string title, string body) : Observable
+    private sealed class ConversationItem : Observable
     {
-        private string currentTitle = title;
-        private string currentBody = body;
+        private readonly Debounce markdownDebounce;
+        private string currentTitle;
+        private string currentBody;
         private string thinking = string.Empty;
+        private int markdownRevision;
 
-        public ConversationRole Role { get; } = role;
+        public ConversationItem(ConversationRole role, string title, string body)
+        {
+            Role = role;
+            currentTitle = title;
+            currentBody = body;
+            markdownDebounce = new Debounce(TimeSpan.FromMilliseconds(90), () =>
+            {
+                FlushMarkdown();
+                return Task.CompletedTask;
+            });
+        }
+
+        public ConversationRole Role { get; }
 
         public string Title
         {
@@ -837,6 +907,12 @@ public sealed class PiAgentView : DockPanel
         {
             get => currentBody;
             private set => Set(ref currentBody, value);
+        }
+
+        public int MarkdownRevision
+        {
+            get => markdownRevision;
+            private set => Set(ref markdownRevision, value);
         }
 
         public string Thinking
@@ -853,9 +929,37 @@ public sealed class PiAgentView : DockPanel
 
         public bool HasThinking => thinking.Length > 0;
 
-        public void AppendBody(string delta) => Body += delta;
+        public void AppendBody(string delta)
+        {
+            bool wasEmpty = Body.Length == 0;
+            Body += delta;
+            if (Role == ConversationRole.Assistant)
+            {
+                if (wasEmpty)
+                {
+                    FlushMarkdown();
+                }
+                else
+                {
+                    markdownDebounce.Restart();
+                }
+            }
+        }
 
-        public void SetBody(string value) => Body = value;
+        public void SetBody(string value)
+        {
+            Body = value;
+            if (Role == ConversationRole.Assistant)
+            {
+                FlushMarkdown();
+            }
+        }
+
+        public void FlushMarkdown()
+        {
+            markdownDebounce.Stop();
+            MarkdownRevision++;
+        }
 
         public void AppendThinking(string delta) => Thinking += delta;
     }

@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Passenger.Agent;
 using Passenger.App;
 using Passenger.App.Agent;
@@ -212,6 +213,37 @@ public sealed class PiAgentTests
         finally
         {
             dialog.Close(false);
+        }
+    }
+
+    [AvaloniaFact]
+    public void Assistant_messages_render_markdown_heading_code_and_links()
+    {
+        string workspace = TestFolders.Create("pi-md");
+        string agentDir = TestFolders.Create("pi-md-agent");
+        string sessionDir = PiAgentSessionStore.SessionDirectoryFor(workspace, agentDir);
+        Directory.CreateDirectory(sessionDir);
+        SessionManager manager = SessionManager.Create(workspace, sessionDir);
+        manager.AppendMessage(Messages.UserText("Show markdown"));
+        manager.AppendMessage(Messages.AssistantText("# Summary\n\nSee [Passenger](https://example.com).\n\n```csharp\nvar x = 1;\n```"));
+        string file = Directory.GetFiles(sessionDir, "*.jsonl").Single();
+
+        PiAgentView view = new(new PiAgentRuntime(), () => workspace, () => true);
+        Window host = new() { Width = 600, Height = 500, Content = view };
+        host.Show();
+        try
+        {
+            view.OpenSession(new PiAgentSessionSummary("s1", file, "Test", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 2, null));
+            Ui.Settle();
+
+            Assert.Contains(view.GetVisualDescendants().OfType<SelectableTextBlock>(), t =>
+                (t.Text?.Contains("Summary", StringComparison.Ordinal) == true)
+                || (t.Inlines?.OfType<Avalonia.Controls.Documents.Run>().Any(r => r.Text?.Contains("Summary", StringComparison.Ordinal) == true) == true));
+            Assert.Contains(view.GetVisualDescendants().OfType<ColouredCode>(), code => code.Code.Contains("var x = 1;", StringComparison.Ordinal));
+        }
+        finally
+        {
+            host.Close();
         }
     }
 }
