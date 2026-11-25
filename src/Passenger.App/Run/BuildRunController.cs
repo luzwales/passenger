@@ -147,6 +147,7 @@ public sealed partial class BuildRunController
     private TogetherBuild? lastTogether;
     private string? buildFramework;
     private string? buildOutput;
+    private string? buildDotnetRoot;
 
     /// <summary>The global properties the build under way is given beyond its configuration's (<see cref="BuildStep.Properties"/>).</summary>
     private IReadOnlyList<string>? buildProperties;
@@ -376,7 +377,7 @@ public sealed partial class BuildRunController
     /// build of projects side by side given (its project the one in <paramref name="projects"/>), under a run's own build
     /// configuration where <paramref name="configured"/> is given.</summary>
     private void Start(BuildKind kind, IReadOnlyList<string>? projects, Action<BuildOutcome>? then, string? framework, BuildCause cause, PublishRequest? publish,
-        Working? work, string? output = null, TogetherBuild? side = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null)
+        Working? work, string? output = null, TogetherBuild? side = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null, string? dotnetRoot = null)
     {
         UiThread.Check();
         if (session.Folder is null || IsBuilding || session.IsEnded)
@@ -398,6 +399,7 @@ public sealed partial class BuildRunController
         lastTogether = side;
         buildFramework = projects is { Count: > 0 } ? framework : null;
         buildOutput = projects is { Count: > 0 } ? output : null;
+        buildDotnetRoot = projects is { Count: > 0 } ? dotnetRoot : null;
         buildConfigured = projects is { Count: > 0 } ? configured : null;
         buildProperties = projects is { Count: > 0 } ? properties : null;
         IReadOnlyList<string> whole = session.Workspace!.BuildTargets(session.Projects);
@@ -534,7 +536,7 @@ public sealed partial class BuildRunController
                 await CheckBeforeAsync(target, windows, checks, stop);
             };
         }
-        if (session.Builder.StartDotnet(arguments, session.Folder!, publishing?.Environment, after: after) is { } problem)
+        if (session.Builder.StartDotnet(arguments, session.Folder!, publishing?.Environment, after: after, dotnetRoot: buildDotnetRoot) is { } problem)
         {
             FinishBuild(new BuildOutcome(BuildStatus.NotStarted, problem));
         }
@@ -1092,12 +1094,12 @@ public sealed partial class BuildRunController
     /// (<see cref="UpToDate"/>) is not built again, the Build window and the status bar saying so. Built as
     /// <paramref name="configured"/>'s build configuration where given (a run's own), else as the folder's.</summary>
     public Task<BuildOutcome> BuildForAsync(BuildStep step, CancellationToken stopping, Action? reading = null, WorkspaceModel? configured = null) =>
-        BuildForAsync([step.Project], stopping, null, step.Framework, step.Output, reading, configured, step.Properties);
+        BuildForAsync([step.Project], stopping, null, step.Framework, step.Output, reading, configured, step.Properties, step.DotnetRoot);
 
     /// <summary>A start's build of what it starts, as <see cref="BuildForAsync(BuildStep, CancellationToken)"/>, saying in its
     /// work when it waits for a build under way; <paramref name="reading"/> is told as it saves the files its build reads.</summary>
     public Task<BuildOutcome> BuildForAsync(BuildStep step, Working work, Action? reading = null, WorkspaceModel? configured = null) =>
-        BuildForAsync([step.Project], work.Stopping, work, step.Framework, step.Output, reading, configured, step.Properties);
+        BuildForAsync([step.Project], work.Stopping, work, step.Framework, step.Output, reading, configured, step.Properties, step.DotnetRoot);
 
     /// <summary>What a start says of a project it did not build: nothing its build reads changed since its last.</summary>
     public static string UpToDateSaid(string project) => $"{project} is up to date: nothing its build reads has changed since it was built, so it was not built again";
@@ -1112,7 +1114,7 @@ public sealed partial class BuildRunController
     /// given <paramref name="properties"/> of its own is always built. <paramref name="reading"/> is told just before each
     /// save of the files, which the build then reads as saved.</summary>
     private async Task<BuildOutcome> BuildForAsync(IReadOnlyList<string> projects, CancellationToken stopping, Working? work, string? framework = null, string? output = null,
-        Action? reading = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null)
+        Action? reading = null, WorkspaceModel? configured = null, IReadOnlyList<string>? properties = null, string? dotnetRoot = null)
     {
         UiThread.Check();
         List<UpToDate.Check> checks = [];
@@ -1183,7 +1185,7 @@ public sealed partial class BuildRunController
         TaskCompletionSource<BuildOutcome> ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
         // Where they cannot be built together (TogetherBuild.Write's null), they are built one after another.
         Start(BuildKind.Build, side is null ? projects : [side.Project], outcome => ended.TrySetResult(outcome), framework, BuildCause.BeforeLaunch, null, null, output, side,
-            configured, properties);
+            configured, properties, dotnetRoot);
         BuildOutcome built;
         // On the window's thread, and only while the build under way is this one; the folder's end stops it itself.
         using (stopping.Register(() => UiThread.Post(() =>
@@ -1420,7 +1422,7 @@ public sealed partial class BuildRunController
                 WatchBindings(inspected, null);
                 string program = GodotConsole.Program(plan, plan.Program);
                 // What the run says of itself goes with its status, the terminal's tab being the program's own.
-                string? refused = await RunInTerminalAsync(chosen.Name, watched ? DotnetStart(Watch(plan), plan.WorkingDirectory) : ChildProcesses.Command(program, plan.Arguments, plan.WorkingDirectory), variables,
+                string? refused = await RunInTerminalAsync(chosen.Name, watched ? DotnetStart(Watch(plan), plan.WorkingDirectory, plan.DotnetRoot) : ChildProcesses.Command(program, plan.Arguments, plan.WorkingDirectory), variables,
                     string.Join("; ", [running, .. plan.Notes]), work);
                 if (refused is null && session.InTerminal is { } inTerminal)
                 {
@@ -1480,7 +1482,7 @@ public sealed partial class BuildRunController
             }
             // Its fork off the window's thread (#441): the program runs from now as Stop and IsRunning see it, its id known once started.
             string? notStarted = Started(watched
-                ? await session.Runner.StartDotnetAsync(Watch(plan), plan.WorkingDirectory, variables, plan.Placed)
+                ? await session.Runner.StartDotnetAsync(Watch(plan), plan.WorkingDirectory, variables, plan.Placed, plan.DotnetRoot)
                 : await session.Runner.StartAsync(plan.Start(), variables));
             if (notStarted is null)
             {
@@ -1928,11 +1930,13 @@ public sealed partial class BuildRunController
     }
 
     /// <summary>The .NET command line as the IDE runs it, or null where there is none (which the run then says).</summary>
-    private static ProcessStartInfo? DotnetStart(IReadOnlyList<string> arguments, string folder)
+    private static ProcessStartInfo? DotnetStart(IReadOnlyList<string> arguments, string folder, string? dotnetRoot = null)
     {
         try
         {
-            return ChildProcesses.DotnetCommand(arguments, folder);
+            return string.IsNullOrWhiteSpace(dotnetRoot)
+                ? ChildProcesses.DotnetCommand(arguments, folder)
+                : ChildProcesses.DotnetCommand(Dotnet.HostFor(folder, dotnetRoot), arguments, folder);
         }
         catch (FileNotFoundException)
         {

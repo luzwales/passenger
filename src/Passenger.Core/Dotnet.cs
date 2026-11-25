@@ -31,12 +31,15 @@ public static partial class Dotnet
     }
 
     /// <summary>The version dotnet names, taken as its line comes: whatever dotnet does after naming it is never waited for.</summary>
-    private static async Task<string> AskSdkAsync(string folder)
+    private static async Task<string> AskSdkAsync(string folder, string? explicitHost = null)
     {
         ChildAnswer version;
         try
         {
-            version = await ChildProcesses.AnswerAsync(SdkQuestion(folder), line => SdkVersion().IsMatch(line.Trim()), limit: TimeSpan.FromMinutes(1))
+            ProcessStartInfo start = explicitHost is null
+                ? SdkQuestion(folder)
+                : ChildProcesses.DotnetQuestion(explicitHost, ["--version"], folder);
+            version = await ChildProcesses.AnswerAsync(start, line => SdkVersion().IsMatch(line.Trim()), limit: TimeSpan.FromMinutes(1))
                 .ConfigureAwait(false);
         }
         catch (System.ComponentModel.Win32Exception unstarted)
@@ -111,6 +114,27 @@ public static partial class Dotnet
     /// (framework-dependent, its runtime three folders under the host), else one on DOTNET_ROOT or the PATH, else where the
     /// installers put it; for a folder, the one its projects take (<see cref="Find(string?)"/>).</summary>
     public static string Host(string? folder = null) => HostSearch is { } standIn ? standIn() : Find(folder)?.Host ?? throw new FileNotFoundException(NotFound);
+
+    /// <summary>The <c>dotnet</c> executable for <paramref name="explicitRoot"/> when given and present, else <see cref="Host(string?)"/>.</summary>
+    public static string HostFor(string? folder, string? explicitRoot) =>
+        explicitRoot is { Length: > 0 } root && Path.Combine(PathNames.Canonical(root), HostName) is { } host && File.Exists(host)
+            ? host
+            : Host(folder);
+
+    /// <summary>The installation folder for <paramref name="explicitRoot"/> when given and present, else <see cref="Root(string?)"/>.</summary>
+    public static string RootFor(string? folder, string? explicitRoot) =>
+        Path.GetDirectoryName(PathNames.Canonical(HostFor(folder, explicitRoot)))!;
+
+    /// <summary>The SDK version for <paramref name="folder"/> using <paramref name="explicitRoot"/> when given.</summary>
+    public static Task<string> SdkAsync(string folder, string? explicitRoot, CancellationToken cancel = default)
+    {
+        if (string.IsNullOrWhiteSpace(explicitRoot))
+        {
+            return SdkAsync(folder, cancel);
+        }
+        string host = HostFor(folder, explicitRoot);
+        return Sdks.Take($"{folder}\n{GlobalJsonOver(folder)}\n{TakesOnlyTrusted(folder)}\n{host}", () => AskSdkAsync(folder, host)).WaitAsync(cancel);
+    }
 
     /// <summary>The <c>dotnet</c> <see cref="Host"/> runs and where it was found; null with none.</summary>
     public static DotnetFound? Find()
@@ -354,8 +378,87 @@ public static partial class Dotnet
             yield return "/usr/lib64/dotnet/dotnet";
         }
         yield return Path.Combine(home, ".dotnet", name);
+        if (DotnetupRoot(home) is { } dotnetup)
+        {
+            yield return Path.Combine(dotnetup, name);
+        }
+    }
+
+    /// <summary>The .NET installation managed by <c>dotnetup</c>, if present on disk.</summary>
+    public static string? DotnetupRoot(string? home = null)
+    {
+        string userHome = string.IsNullOrWhiteSpace(home) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : home;
+        string? envHome = Environment.GetEnvironmentVariable("DOTNETUP_HOME");
+        IEnumerable<string> candidates = OperatingSystem.IsWindows()
+            ? [
+                .. (envHome is { Length: > 0 } ? [Path.Combine(envHome, "dotnet")] : Array.Empty<string>()),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dotnetup", "dotnet"),
+                Path.Combine(userHome, "AppData", "Local", "dotnetup", "dotnet"),
+            ]
+            : [
+                .. (envHome is { Length: > 0 } ? [Path.Combine(envHome, "dotnet")] : Array.Empty<string>()),
+                Path.Combine(userHome, ".local", "share", "dotnetup", "dotnet"),
+            ];
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(Path.Combine(candidate, HostName)))
+            {
+                return PathNames.Canonical(candidate);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Whether <paramref name="root"/> is the <c>dotnetup</c>-managed .NET installation.</summary>
+    public static bool IsDotnetupRoot(string? root) =>
+        !string.IsNullOrWhiteSpace(root) && DotnetupRoot() is { } dotnetup && PathNames.Same(root, dotnetup);
+
+    /// <summary>What <see cref="TerminalEnvironment"/> resolves for a terminal shell: an explicit <see cref="Apart"/>
+    /// installation only when the folder's <c>global.json</c> requires one different from the user's normal <c>PATH</c>
+    /// <c>dotnet</c>, and whether any inherited <c>DOTNET_ROOT</c> pointing to <c>dotnetup</c> should be cleared.</summary>
+    public static (string? ApartRoot, bool ClearDotnetupRoot) TerminalDotnet(string? folder)
+    {
+        string? dotnetup = DotnetupRoot();
+        string? envRoot = Environment.GetEnvironmentVariable(RuntimeVariables.Root);
+        bool envIsDotnetup = dotnetup is not null && !string.IsNullOrWhiteSpace(envRoot) && PathNames.Same(envRoot, dotnetup);
+
+        if (folder is not null && Find(folder) is { } taken && Find() is { } first && taken != first)
+        {
+            // Only override terminal when global.json selected a different SDK, not because Passenger ran on dotnetup.
+            if (taken.Place == DotnetPlace.GlobalJson || GlobalJsonIn(folder) is not null)
+            {
+                return (taken.Root, false);
+            }
+        }
+        return (null, envIsDotnetup);
+    }
+
+    /// <summary>All discovered .NET installations on this machine (system <c>dotnet</c>, user <c>.dotnet</c>, <c>dotnetup</c>, etc.),
+    /// deduplicated by canonical root, with newest SDK version and whether it is <c>dotnetup</c>.</summary>
+    public static IReadOnlyList<DotnetEnvironmentInfo> Environments()
+    {
+        List<DotnetEnvironmentInfo> list = [];
+        HashSet<string> seen = new(PathNames.Comparer);
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (DotnetFound found in Candidates(home))
+        {
+            string root = PathNames.Canonical(found.Root);
+            if (!seen.Add(root))
+            {
+                continue;
+            }
+            DotnetInstallation installation = DotnetInstallation.Read(root);
+            bool isDotnetup = IsDotnetupRoot(root);
+            string kind = isDotnetup ? "dotnetup" : "dotnet";
+            string sdkText = installation.NewestSdk is { } sdk ? $" ({sdk})" : string.Empty;
+            list.Add(new DotnetEnvironmentInfo(root, $"{kind}{sdkText} — {PathNames.Shown(root, null)}", installation.NewestSdk, isDotnetup));
+        }
+        return list;
     }
 }
+
+/// <summary>One discovered .NET installation on this machine.</summary>
+public sealed record DotnetEnvironmentInfo(string Root, string Label, string? NewestSdk, bool IsDotnetup);
 
 /// <summary>How <see cref="Dotnet.Find()"/> found a dotnet: the one running this app, DOTNET_ROOT's, the PATH's, or one
 /// neither names, where an installer puts it or <see cref="Dotnet.Use"/> chose it; or, for a process the system translates,

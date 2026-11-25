@@ -115,6 +115,10 @@ public sealed record RunConfiguration
     /// <summary>The target framework run, for a project with several; empty for the first.</summary>
     public string Framework { get; init; } = string.Empty;
 
+    /// <summary>The .NET installation root (e.g. <c>C:\Program Files\dotnet</c> or <c>dotnetup</c>) used to build,
+    /// evaluate, run, and debug this configuration; empty for the folder's default.</summary>
+    public string DotnetRoot { get; init; } = string.Empty;
+
     /// <summary>The launch profile its values came from, if one did.</summary>
     public string LaunchProfile { get; init; } = string.Empty;
 
@@ -505,6 +509,7 @@ public sealed record RunConfiguration
         Project = Project ?? string.Empty,
         LinkedAppHosts = [.. (LinkedAppHosts ?? []).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(Core.PathNames.Comparer)],
         Framework = Framework ?? string.Empty,
+        DotnetRoot = string.IsNullOrWhiteSpace(DotnetRoot) ? string.Empty : Core.PathNames.Canonical(DotnetRoot.Trim()),
         LaunchProfile = LaunchProfile ?? string.Empty,
         Program = Program ?? string.Empty,
         Script = Script ?? string.Empty,

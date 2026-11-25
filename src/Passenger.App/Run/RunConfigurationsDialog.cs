@@ -52,9 +52,9 @@ public sealed class RunConfigurationsDialog : IdeWindow
     private readonly Control[] copyRows = new Control[2];
     private readonly Control[] browserRows;
 
-    /// <summary>The rows of what a build makes (its framework, launch profile and build before launch), which a Godot project
+    /// <summary>The rows of what a build makes (its framework, .NET environment, launch profile and build before launch), which a Godot project
     /// of GDScript alone has none of.</summary>
-    private readonly Control[] builtRows = new Control[3];
+    private readonly Control[] builtRows = new Control[4];
 
     /// <summary>The rows of how Passenger starts the program, which a game Godot's editor plays takes none of.</summary>
     private readonly Control[] launchRows = new Control[5];
@@ -127,6 +127,8 @@ public sealed class RunConfigurationsDialog : IdeWindow
         NameBox = Field();
         ProjectBox = new FormDropDown();
         FrameworkBox = new FormDropDown();
+        DotnetEnvironmentBox = new FormDropDown { Name = "DotnetEnvironmentBox" };
+        ToolTip.SetTip(DotnetEnvironmentBox, "The .NET installation (dotnet or dotnetup) used to build, evaluate, run and debug this configuration");
         BuildConfigurationBox = new FormDropDown { Name = "BuildConfigurationBox" };
         ToolTip.SetTip(BuildConfigurationBox, "What its run builds, evaluates and starts as, in place of the build configuration the folder builds as");
         ProfileBox = new FormDropDown();
@@ -176,6 +178,10 @@ public sealed class RunConfigurationsDialog : IdeWindow
             _ => c,
         }, reshow: true);
         FrameworkBox.SelectionChanged += (_, _) => Edit(c => c with { Framework = FrameworkBox.SelectedIndex <= 0 ? string.Empty : FrameworkBox.SelectedItem as string ?? string.Empty });
+        DotnetEnvironmentBox.SelectionChanged += (_, _) => Edit(c => c with
+        {
+            DotnetRoot = DotnetEnvironmentBox.SelectedIndex <= 0 ? string.Empty : (DotnetEnvironmentBox.SelectedItem as ComboBoxItem)?.Tag as string ?? c.DotnetRoot,
+        });
         BuildConfigurationBox.SelectionChanged += (_, _) => Edit(c => c with
         {
             BuildConfiguration = BuildConfigurationBox.SelectedIndex <= 0 ? string.Empty : (BuildConfigurationBox.SelectedItem as ComboBoxItem)?.Tag as string ?? c.BuildConfiguration,
@@ -284,6 +290,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
             (copyRows[0], [RunKind.Project]),
             (copyRows[1], [RunKind.Project]),
             (builtRows[0] = Row("Target framework", FrameworkBox, fields: ["framework"]), [RunKind.Project, RunKind.Dockerfile, RunKind.SdkContainer]),
+            (builtRows[3] = Row(".NET environment", DotnetEnvironmentBox, fields: ["dotnetRoot"]), [RunKind.Project]),
             (buildConfigurationRow = Row("Build configuration", BuildConfigurationBox, fields: ["buildConfiguration"]),
                 [RunKind.Project, RunKind.Compose, RunKind.Dockerfile, RunKind.SdkContainer]),
             // Narrower than both, Save as Launch Profile goes under the drop-down rather than past the form's edge.
@@ -474,6 +481,9 @@ public sealed class RunConfigurationsDialog : IdeWindow
     }
 
     public ComboBox FrameworkBox { get; }
+
+    /// <summary>The .NET installation (Auto, dotnet, dotnetup, etc.) used to build, run and debug this configuration.</summary>
+    public ComboBox DotnetEnvironmentBox { get; }
 
     /// <summary>What a Godot project's configuration starts: its game, or Godot's editor on it.</summary>
     public ComboBox GodotBox { get; }
@@ -1204,6 +1214,22 @@ public sealed class RunConfigurationsDialog : IdeWindow
         BuildConfigurationBox.SelectedIndex = chosen;
     }
 
+    private void ShowDotnetEnvironments(RunConfiguration shown)
+    {
+        IReadOnlyList<DotnetEnvironmentInfo> environments = Dotnet.Environments();
+        List<ComboBoxItem> items = [new() { Content = "Auto (folder default)" }];
+        items.AddRange(environments.Select(env => new ComboBoxItem { Content = env.Label, Tag = env.Root }));
+        int chosen = shown.DotnetRoot.Length == 0 ? 0
+            : environments.ToList().FindIndex(env => PathNames.Same(env.Root, shown.DotnetRoot)) + 1;
+        if (chosen == 0 && shown.DotnetRoot.Length > 0)
+        {
+            items.Add(new ComboBoxItem { Content = $"{shown.DotnetRoot} (not found)", Tag = shown.DotnetRoot });
+            chosen = items.Count - 1;
+        }
+        DotnetEnvironmentBox.ItemsSource = items;
+        DotnetEnvironmentBox.SelectedIndex = chosen;
+    }
+
     private void ShowChosen()
     {
         RunConfiguration? shown = Chosen;
@@ -1251,6 +1277,7 @@ public sealed class RunConfigurationsDialog : IdeWindow
             IReadOnlyList<string> frameworks = project?.TargetFrameworks ?? [];
             FrameworkBox.ItemsSource = (string[])[frameworks.Count > 0 ? $"Default ({frameworks[0]})" : "Default", .. frameworks];
             FrameworkBox.SelectedIndex = shown.Framework.Length == 0 ? 0 : Math.Max(0, frameworks.ToList().IndexOf(shown.Framework) + 1);
+            ShowDotnetEnvironments(shown);
             ShowBuildConfigurations(shown);
             IReadOnlyList<LaunchProfile> profiles = project is null ? [] : LaunchProfile.Read(project);
             ProfileBox.ItemsSource = (string[])["None", .. profiles.Select(p => p.Name)];

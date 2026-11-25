@@ -125,12 +125,14 @@ public sealed class ProcessRunner : IDisposable, IRunningProgram
     /// callers see it (<see cref="IsRunning"/>, <see cref="Stop"/>, <see cref="Ended"/>) and its process starts once the
     /// wait is over; stopped meanwhile, or unable to start then (<see cref="Unstarted"/>), it ends with exit code -1.</summary>
     public string? StartDotnet(IReadOnlyList<string> arguments, string folder, IReadOnlyDictionary<string, string>? environment = null,
-        Func<CancellationToken, Task>? after = null)
+        Func<CancellationToken, Task>? after = null, string? dotnetRoot = null)
     {
         ProcessStartInfo start;
         try
         {
-            start = ChildProcesses.DotnetCommand(arguments, folder);
+            start = string.IsNullOrWhiteSpace(dotnetRoot)
+                ? ChildProcesses.DotnetCommand(arguments, folder)
+                : WithDotnetEnvironment(ChildProcesses.DotnetCommand(Dotnet.HostFor(folder, dotnetRoot), arguments, folder), dotnetRoot);
         }
         catch (FileNotFoundException missing)
         {
@@ -143,12 +145,14 @@ public sealed class ProcessRunner : IDisposable, IRunningProgram
     /// <summary><see cref="StartDotnet"/> with no wait, its fork off the window's thread as <see cref="StartAsync(ProcessStartInfo,
     /// IReadOnlyDictionary{string, string}?)"/>'s is, its start <paramref name="placed"/> where given (a desktop of its own).</summary>
     public Task<string?> StartDotnetAsync(IReadOnlyList<string> arguments, string folder, IReadOnlyDictionary<string, string>? environment = null,
-        Func<ProcessStartInfo, ProcessStartInfo>? placed = null)
+        Func<ProcessStartInfo, ProcessStartInfo>? placed = null, string? dotnetRoot = null)
     {
         ProcessStartInfo start;
         try
         {
-            start = ChildProcesses.DotnetCommand(arguments, folder);
+            start = string.IsNullOrWhiteSpace(dotnetRoot)
+                ? ChildProcesses.DotnetCommand(arguments, folder)
+                : WithDotnetEnvironment(ChildProcesses.DotnetCommand(Dotnet.HostFor(folder, dotnetRoot), arguments, folder), dotnetRoot);
             start = placed?.Invoke(start) ?? start;
         }
         catch (FileNotFoundException missing)
@@ -157,6 +161,17 @@ public sealed class ProcessRunner : IDisposable, IRunningProgram
             return Task.FromResult<string?>(missing.Message);
         }
         return StartAsync(start, environment);
+    }
+
+    private static ProcessStartInfo WithDotnetEnvironment(ProcessStartInfo start, string dotnetRoot)
+    {
+        string root = PathNames.Canonical(dotnetRoot);
+        start.Environment[RuntimeVariables.Root] = root;
+        start.Environment[RuntimeVariables.HostPath] = Dotnet.HostFor(null, root);
+        string pathName = start.Environment.Keys.FirstOrDefault(k => k.Equals("PATH", OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) ?? "PATH";
+        start.Environment.TryGetValue(pathName, out string? currentPath);
+        start.Environment[pathName] = Programs.FirstOnPath(currentPath ?? Environment.GetEnvironmentVariable(pathName) ?? string.Empty, root);
+        return start;
     }
 
     /// <summary>Starts a program; why it could not (a working folder gone, a missing program), or null once it runs.</summary>

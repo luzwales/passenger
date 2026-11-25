@@ -217,12 +217,19 @@ public sealed class TerminalPanel : DockPanel
         {
             throw new InvalidOperationException($"the Shell path in {SettingsDialog.PlaceOfPage(SettingsDialog.TerminalPage)} names no program to start");
         }
-        (FirstOnPath? first, string zsh) = await BackgroundWork.Run(() =>
+        (FirstOnPath? first, Dictionary<string, string>? variables, string zsh) = await BackgroundWork.Run(() =>
         {
             string zsh = FirstOnPath.ZshFolder(Path.Combine(State.StateStore.DefaultRoot, "cache", "terminal"));
-            return (Dotnet.Apart(at) is { } root ? new FirstOnPath(Dotnet.PathFolder(root, State.StateStore.DefaultRoot), RuntimeVariables.Root, root, zsh) : null, zsh);
+            (string? apartRoot, bool clearDotnetupRoot) = Dotnet.TerminalDotnet(at);
+            FirstOnPath? firstOnPath = apartRoot is { } root
+                ? new FirstOnPath(Dotnet.PathFolder(root, State.StateStore.DefaultRoot), RuntimeVariables.Root, root, zsh)
+                : null;
+            Dictionary<string, string>? vars = clearDotnetupRoot
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [RuntimeVariables.Root] = string.Empty }
+                : null;
+            return (firstOnPath, vars, zsh);
         });
-        await session.StartAsync(at, shell?.App, shell?.Arguments, first: first, marks: zsh);
+        await session.StartAsync(at, shell?.App, shell?.Arguments, variables: variables, first: first, marks: zsh);
     }
 
     /// <summary>The name of the tab agents' commands run in.</summary>

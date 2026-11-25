@@ -34,12 +34,24 @@ public static class MSBuildQuestions
     /// <summary>What MSBuild answers the question of the project, for <paramref name="framework"/> or the project as a
     /// whole.</summary>
     public static async Task<MSBuildAnswer> AskAsync(string project, string? framework, IReadOnlyDictionary<string, string> globals, MSBuildQuestion question,
-        CancellationToken cancel)
+        CancellationToken cancel, string? dotnetRoot = null)
     {
         WorkspaceTrust.Check(project);
-        ChildResult said = await ChildProcesses.RunAsync(ChildProcesses.DotnetQuestion(Arguments(project, framework, globals, question), Path.GetDirectoryName(project)!),
-            cancel: cancel);
+        string folder = Path.GetDirectoryName(project)!;
+        IReadOnlyList<string> args = Arguments(project, framework, globals, question);
+        System.Diagnostics.ProcessStartInfo start = string.IsNullOrWhiteSpace(dotnetRoot)
+            ? ChildProcesses.DotnetQuestion(args, folder)
+            : WithDotnetRoot(ChildProcesses.DotnetQuestion(Dotnet.HostFor(folder, dotnetRoot), args, folder), dotnetRoot);
+        ChildResult said = await ChildProcesses.RunAsync(start, cancel: cancel);
         return new MSBuildAnswer(said, question.Alone);
+    }
+
+    private static System.Diagnostics.ProcessStartInfo WithDotnetRoot(System.Diagnostics.ProcessStartInfo start, string dotnetRoot)
+    {
+        string root = PathNames.Canonical(dotnetRoot);
+        start.Environment[RuntimeVariables.Root] = root;
+        start.Environment[RuntimeVariables.HostPath] = Dotnet.HostFor(null, root);
+        return start;
     }
 
     /// <summary>The .NET CLI running the question's targets for their work rather than an answer (an installer's), in the

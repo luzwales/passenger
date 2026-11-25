@@ -9,7 +9,7 @@ namespace Passenger.App.Run;
 
 /// <summary>The project a launch builds first, for one framework when it has several, into the folder given where its own
 /// would not do (a single-file AppHost's, kept in the state).</summary>
-public sealed record BuildStep(string Project, string? Framework, string? Output = null)
+public sealed record BuildStep(string Project, string? Framework, string? Output = null, string? DotnetRoot = null)
 {
     /// <summary>Global properties the build is given beyond the build configuration's, which make it a build of its own
     /// (a MAUI project's plain one for its preview), never checked as up to date; null for none.</summary>
@@ -86,6 +86,9 @@ public sealed partial record LaunchPlan
     public string? Project { get; init; }
 
     public string? Framework { get; init; }
+
+    /// <summary>The explicit .NET installation root for this launch, if configured.</summary>
+    public string? DotnetRoot { get; init; }
 
     /// <summary>The framework the program runs on ("net10.0"): the one chosen, else the project's own; null where unknown.</summary>
     public string? RunsOn { get; init; }
@@ -381,12 +384,13 @@ public sealed partial record LaunchPlan
                 names.Add(macro.Groups[1].Value);
             }
         }
-        IReadOnlyDictionary<string, string> properties = await EvaluateAsync(project, framework, names, workspace, cancel);
+        string? explicitDotnet = string.IsNullOrWhiteSpace(configuration.DotnetRoot) ? null : configuration.DotnetRoot;
+        IReadOnlyDictionary<string, string> properties = await EvaluateAsync(project, framework, names, workspace, cancel, dotnetRoot: explicitDotnet);
         // A project naming its one framework in TargetFrameworks evaluates as an outer build, which builds nothing itself.
         if (framework is null && project.TargetFrameworks is [{ } only] && !properties.ContainsKey(CarriedProperties.TargetPath))
         {
             framework = only;
-            properties = await EvaluateAsync(project, framework, names, workspace, cancel);
+            properties = await EvaluateAsync(project, framework, names, workspace, cancel, dotnetRoot: explicitDotnet);
         }
         string Expand(string text) => System.Environment.ExpandEnvironmentVariables(
             Macro().Replace(text, macro => properties.GetValueOrDefault(macro.Groups[1].Value, string.Empty)));
@@ -425,11 +429,11 @@ public sealed partial record LaunchPlan
         string? x86 = null;
         if (configuration.Program is { Length: > 0 } named)
         {
-            program = Executable(Expand(named), project.Folder);
+            program = Executable(Expand(named), project.Folder, explicitDotnet);
         }
         else if (OtherProgram(properties, target) is ({ } command, { } given))
         {
-            program = Executable(command, project.Folder);
+            program = Executable(command, project.Folder, explicitDotnet);
             arguments.InsertRange(0, given);
             leading = given.Count;
             built = target;
@@ -452,7 +456,7 @@ public sealed partial record LaunchPlan
             }
             else if (assembly)
             {
-                program = x86 is null ? Dotnet.Host(project.Folder) : System.IO.Path.Combine(x86, Dotnet.HostName);
+                program = x86 is null ? Dotnet.HostFor(project.Folder, explicitDotnet) : System.IO.Path.Combine(x86, Dotnet.HostName);
                 arguments.Insert(0, target);
                 built = target;
                 leading = 1;
@@ -467,11 +471,26 @@ public sealed partial record LaunchPlan
             ? System.IO.Path.TrimEndingDirectorySeparator(PathNames.Canonical(System.IO.Path.Combine(project.Folder, folder)))
             : System.IO.Path.GetDirectoryName(target)!;
         Dictionary<string, string> environment = Variables();
+        if (explicitDotnet is not null)
+        {
+            string resolvedRoot = Dotnet.RootFor(project.Folder, explicitDotnet);
+            if (!environment.Keys.Any(k => k.Equals(RuntimeVariables.Root, StringComparison.OrdinalIgnoreCase)))
+            {
+                environment[RuntimeVariables.Root] = resolvedRoot;
+            }
+            if (!environment.Keys.Any(k => k.Equals(RuntimeVariables.HostPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                environment[RuntimeVariables.HostPath] = Dotnet.HostFor(project.Folder, explicitDotnet);
+            }
+            string pathName = environment.Keys.FirstOrDefault(k => k.Equals("PATH", OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) ?? "PATH";
+            environment.TryGetValue(pathName, out string? currentPath);
+            environment[pathName] = Programs.FirstOnPath(currentPath ?? System.Environment.GetEnvironmentVariable(pathName) ?? string.Empty, resolvedRoot);
+        }
         // The apphost takes its runtime from the .NET that builds it (an x86 one's from the x86 .NET), or the one the configuration names, over any the IDE inherited.
         if (host is not null && !environment.Keys.Any(k => k.Equals(host.RootVariable, StringComparison.OrdinalIgnoreCase)))
         {
             environment[host.RootVariable] = host.X86 && x86 is not null ? x86
-                : environment.Where(v => v.Key.Equals(RuntimeVariables.Root, StringComparison.OrdinalIgnoreCase)).Select(v => v.Value).FirstOrDefault() ?? Dotnet.Root(project.Folder);
+                : environment.Where(v => v.Key.Equals(RuntimeVariables.Root, StringComparison.OrdinalIgnoreCase)).Select(v => v.Value).FirstOrDefault() ?? Dotnet.RootFor(project.Folder, explicitDotnet);
         }
         string? other = DesktopPrograms.NamedProject(program, arguments, working) is { } runs && !PathNames.Same(runs, project.Path) && !PathNames.Same(runs, project.Folder) ? runs : null;
         if (SandboxedState(built ?? program, environment, stateFolder) is { } sandbox)
@@ -492,8 +511,9 @@ public sealed partial record LaunchPlan
             Project = project.Path,
             InBrowser = [.. project.WithReferenced(projects).Where(p => p.RunsInBrowser).Select(p => p.Path)],
             Framework = framework,
+            DotnetRoot = explicitDotnet,
             RunsOn = framework ?? project.TargetFrameworks.FirstOrDefault(),
-            Build = configuration.BuildBeforeLaunch ? new BuildStep(project.Path, framework) : null,
+            Build = configuration.BuildBeforeLaunch ? new BuildStep(project.Path, framework, DotnetRoot: explicitDotnet) : null,
             Built = built,
             Target = target,
             DesktopProject = other is null ? DesktopPrograms.OfProject(project, projects) : DesktopPrograms.OfNamed(other, projects),
@@ -600,11 +620,11 @@ public sealed partial record LaunchPlan
 
     /// <summary>A program a configuration names: the .NET command line by name is the one the IDE builds with, a path is
     /// the project folder's when relative, and a bare name is looked for on the PATH as a shell would.</summary>
-    private static string Executable(string named, string projectFolder)
+    private static string Executable(string named, string projectFolder, string? explicitDotnet = null)
     {
         if (named is "dotnet" or "dotnet.exe")
         {
-            return Dotnet.Host(projectFolder);
+            return Dotnet.HostFor(projectFolder, explicitDotnet);
         }
         if (named.IndexOfAny(['/', '\\']) >= 0 || System.IO.Path.IsPathRooted(named))
         {
@@ -624,7 +644,7 @@ public sealed partial record LaunchPlan
     /// ContainerBaseImage), which the host does not run, so dotnet msbuild does, and as evaluated when it does not run (a
     /// project not restored yet). A property with no value is left out.</summary>
     internal static async Task<IReadOnlyDictionary<string, string>> EvaluateAsync(ProjectModel project, string? framework, IReadOnlyCollection<string> names,
-        WorkspaceModel? workspace, CancellationToken cancel, string? target = null)
+        WorkspaceModel? workspace, CancellationToken cancel, string? target = null, string? dotnetRoot = null)
     {
         Dictionary<string, string> globals = ProjectModels.Properties(workspace, project);
         if (framework is not null)
@@ -633,7 +653,14 @@ public sealed partial record LaunchPlan
         }
         if (target is not null)
         {
-            return await AfterTargetAsync(project, framework, names, globals, target, cancel) ?? await EvaluateAsync(project, framework, names, workspace, cancel);
+            return await AfterTargetAsync(project, framework, names, globals, target, cancel, dotnetRoot) ?? await EvaluateAsync(project, framework, names, workspace, cancel, dotnetRoot: dotnetRoot);
+        }
+        if (!string.IsNullOrWhiteSpace(dotnetRoot))
+        {
+            MSBuildAnswer explicitAnswer = await MSBuildQuestions.AskAsync(project.Path, framework, globals, new MSBuildQuestion([]) { Properties = [.. names] }, cancel, dotnetRoot);
+            return explicitAnswer.Succeeded && explicitAnswer.Answered
+                ? explicitAnswer.Properties
+                : throw new LaunchException($"MSBuild could not say what {project.Name} builds");
         }
         PropertiesAnswer answer;
         try
@@ -653,9 +680,9 @@ public sealed partial record LaunchPlan
 
     /// <summary>The properties as they stand once a target has run, asked of MSBuild; null when it did not run.</summary>
     private static async Task<IReadOnlyDictionary<string, string>?> AfterTargetAsync(ProjectModel project, string? framework, IReadOnlyCollection<string> names,
-        IReadOnlyDictionary<string, string> globals, string target, CancellationToken cancel)
+        IReadOnlyDictionary<string, string> globals, string target, CancellationToken cancel, string? dotnetRoot = null)
     {
-        MSBuildAnswer answer = await MSBuildQuestions.AskAsync(project.Path, framework, globals, new MSBuildQuestion([target]) { Properties = [.. names] }, cancel);
+        MSBuildAnswer answer = await MSBuildQuestions.AskAsync(project.Path, framework, globals, new MSBuildQuestion([target]) { Properties = [.. names] }, cancel, dotnetRoot);
         return answer.Succeeded && answer.Answered ? answer.Properties : null;
     }
 

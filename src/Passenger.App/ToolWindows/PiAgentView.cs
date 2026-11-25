@@ -791,19 +791,56 @@ public sealed class PiAgentView : DockPanel
 
     private Control BuildConversationCard()
     {
+        // ── Tool card (accordion, collapsed by default) ──────────────────────────
+        bool toolExpanded = false;
+        RowExpander toolExpander = null!;
+        TextBlock toolTitle = new() { Classes = { StyleClasses.Strong, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        TextBlock toolBody = new()
+        {
+            Classes = { StyleClasses.Caption, StyleClasses.Code },
+            TextWrapping = TextWrapping.Wrap,
+            IsVisible = false,
+            Margin = new Thickness(Gaps.Normal + RowExpander.Column, Gaps.Hair, 0, 0),
+        };
+        void ToggleTool()
+        {
+            toolExpanded = !toolExpanded;
+            toolExpander.Chevron.Turned = toolExpanded;
+            toolBody.IsVisible = toolExpanded;
+        }
+        toolExpander = new RowExpander(ToggleTool) { Expands = true };
+        StackPanel toolHeader = new()
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Gaps.Small,
+            Children = { toolExpander, toolTitle },
+        };
+        Button toolHeaderButton = new()
+        {
+            Classes = { StyleClasses.Link },
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Content = toolHeader,
+            Padding = new Thickness(0),
+        };
+        toolHeaderButton.Click += (_, _) => ToggleTool();
+        StackPanel toolStack = new() { Spacing = Gaps.Hair, Children = { toolHeaderButton, toolBody } };
+
+        // ── Assistant / User card ────────────────────────────────────────────────
         TextBlock title = new() { Classes = { StyleClasses.Strong, StyleClasses.Caption }, TextTrimming = TextTrimming.CharacterEllipsis };
         TextBlock thinking = new() { Classes = { StyleClasses.Muted, StyleClasses.Caption }, TextWrapping = TextWrapping.Wrap, IsVisible = false };
         TextBlock plainBody = new() { TextWrapping = TextWrapping.Wrap };
         StackPanel markdownBody = new() { Spacing = Gaps.Small, IsVisible = false };
         StackPanel bodyStack = new() { Spacing = Gaps.Tight, Children = { title, thinking, plainBody, markdownBody } };
+
+        // The card hosts either toolStack or bodyStack depending on role.
         Border card = new()
         {
-            BorderThickness = Hairlines.Round,
+            BorderThickness = new Thickness(0),
             Margin = new Thickness(0, 0, 0, Gaps.Normal),
             Padding = new Thickness(Gaps.Normal),
             Child = bodyStack,
         };
-        card.Bind(Border.BorderBrushProperty, card.GetResourceObservable(TokenKeys.PopupBorder));
         card.Bind(Border.BackgroundProperty, card.GetResourceObservable(TokenKeys.List));
         card.Bind(Border.CornerRadiusProperty, card.GetResourceObservable(TokenKeys.ControlRadius));
 
@@ -838,6 +875,14 @@ public sealed class PiAgentView : DockPanel
             {
                 SyncMarkdown();
             }
+            else if (e.PropertyName == nameof(ConversationItem.Body) && boundItem?.Role == ConversationRole.Tool)
+            {
+                toolBody.Text = CleanToolOutput(boundItem.Body);
+            }
+            else if (e.PropertyName == nameof(ConversationItem.Title) && boundItem?.Role == ConversationRole.Tool)
+            {
+                toolTitle.Text = boundItem.Title;
+            }
         }
 
         return card.Showing<ConversationItem>(item =>
@@ -850,20 +895,75 @@ public sealed class PiAgentView : DockPanel
             renderedRevision = -1;
             boundItem.PropertyChanged += OnItemPropertyChanged;
 
-            title.DataContext = item;
+            bool isTool = item.Role == ConversationRole.Tool;
+            bool isUser = item.Role == ConversationRole.User;
             bool isAssistant = item.Role == ConversationRole.Assistant;
-            plainBody.IsVisible = !isAssistant;
-            plainBody.Classes.Set(StyleClasses.Code, item.Role == ConversationRole.Tool);
-            title.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Title)));
-            plainBody.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Body)));
-            thinking.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Thinking)));
-            thinking.Bind(IsVisibleProperty, new Avalonia.Data.Binding(nameof(ConversationItem.HasThinking)));
-            markdownBody.IsVisible = isAssistant && !string.IsNullOrWhiteSpace(item.Body);
-            if (isAssistant)
+
+            if (isTool)
             {
-                SyncMarkdown();
+                // Tool card: compact accordion layout, no border, reduced gap
+                card.Child = toolStack;
+                card.HorizontalAlignment = HorizontalAlignment.Stretch;
+                card.Margin = new Thickness(0, 0, 0, Gaps.Hair);
+                card.Padding = new Thickness(Gaps.Small, Gaps.Hair);
+                card.Bind(Border.BackgroundProperty, card.GetResourceObservable(TokenKeys.List));
+                // Reset expand state for reused row
+                toolExpanded = false;
+                toolExpander.Chevron.Turned = false;
+                toolBody.IsVisible = false;
+                toolTitle.Text = item.Title;
+                toolBody.Text = CleanToolOutput(item.Body);
+                // Rebind title so live updates work
+                toolTitle.DataContext = item;
+                toolBody.DataContext = item;
+            }
+            else
+            {
+                // User / Assistant card
+                card.Child = bodyStack;
+                card.HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+                card.Margin = isUser
+                    ? new Thickness(Gaps.Screen, 0, 0, Gaps.Normal)
+                    : new Thickness(0, 0, 0, Gaps.Normal);
+                card.Padding = new Thickness(Gaps.Normal);
+
+                title.DataContext = item;
+                title.IsVisible = !isUser;
+                plainBody.IsVisible = !isAssistant;
+                plainBody.Classes.Set(StyleClasses.Code, false);
+                title.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Title)));
+                plainBody.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Body)));
+                thinking.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ConversationItem.Thinking)));
+                thinking.Bind(IsVisibleProperty, new Avalonia.Data.Binding(nameof(ConversationItem.HasThinking)));
+                markdownBody.IsVisible = isAssistant && !string.IsNullOrWhiteSpace(item.Body);
+                if (isAssistant)
+                {
+                    SyncMarkdown();
+                }
+
+                // User card: different background (button-tone) so it stands out
+                card.Bind(Border.BackgroundProperty, card.GetResourceObservable(isUser ? TokenKeys.Button : TokenKeys.List));
             }
         });
+    }
+
+    /// <summary>Strips non-printable ASCII control characters (except newline/tab) from tool output text.</summary>
+    private static string CleanToolOutput(string raw)
+    {
+        if (string.IsNullOrEmpty(raw))
+        {
+            return raw;
+        }
+        System.Text.StringBuilder sb = new(raw.Length);
+        foreach (char c in raw)
+        {
+            // Keep newline (10), carriage return (13), tab (9), and all printable chars.
+            if (c == '\n' || c == '\r' || c == '\t' || (c >= 32 && c != 127))
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString();
     }
 
     private static string NewSessionId() => Guid.NewGuid().ToString("N")[..12];
