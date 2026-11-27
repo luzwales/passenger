@@ -108,6 +108,7 @@ public partial class MainWindow : IdeWindow
         AddBreadcrumbs();
         AddBookmarks();
         AddPiAgent();
+        AddLinq();
         AddGamePane();
         AddEndpoints();
         AddGodotEditor();
@@ -926,6 +927,7 @@ public partial class MainWindow : IdeWindow
         assist.RenameSettings = store.Refactorings.Value;
         assist.RenameSettingsChanged += (_, _) => state?.Refactorings.Set(assist.RenameSettings);
         keepsWorkspace = true;
+        LoadLinqConnectionsState();
         RestoreWorkspace();
         ShowRecent();
     }

@@ -36,4 +36,7 @@ public sealed class ToolViews
     public TestsView Tests { get; }
 
     public Testing.TestTree TestTree { get; } = new();
+
+    /// <summary>The LINQ Result window, showing <c>.Dump()</c> HTML tables and SQL logs for <c>.linq</c> queries.</summary>
+    public LinqResultView LinqResult { get; } = new();
 }

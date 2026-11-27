@@ -12,6 +12,7 @@ type="expression"`), which `Passenger.Notices` writes into the app's notices und
 - `BSD-2-Clause.txt`: the same release's `text/BSD-2-Clause.txt`, for Jint.
 - `MS-PL.txt`: the same release's `text/MS-PL.txt`, for Svg.Custom, the SVG model Svg.Skia draws from (the owner's
   choice for SVG files' pictures).
+- `PostgreSQL.txt`: the same release's `text/PostgreSQL.txt`, for Npgsql.
 
 An npm package (under web/) that carries its own licence file is written with that file, which holds its copyright; one
 without is written with the text here for the SPDX identifier its package.json states.

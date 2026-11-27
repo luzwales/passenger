@@ -413,6 +413,11 @@ public static class AppActions
     public const string ShowPiAgent = "app.showPiAgent";
     public const string PiAgentNewSession = "app.piAgent.newSession";
     public const string PiAgentSettings = "app.piAgent.settings";
+    public const string ShowLinqResult = "app.showLinqResult";
+    public const string ShowLinqConnections = "app.showLinqConnections";
+    public const string RunLinq = "app.linq.run";
+    public const string DebugLinq = "app.linq.debug";
+    public const string StopLinq = "app.linq.stop";
     public const string InsertStep = "app.steps.insert";
 
     // Rider's ReformatWithPrettierAction (its Visual Studio keymaps give its keys to VcsShowPrevChangeMarker) and

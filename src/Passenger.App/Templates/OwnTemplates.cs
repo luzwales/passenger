@@ -13,7 +13,17 @@ public static class OwnTemplates
     public static IReadOnlyList<string> TypeKinds { get; } = ["Class", "Interface", "Record", "Struct", "Enum"];
 
     /// <summary>Every one, as New Item lists it: an entry with one C# variant and no options.</summary>
-    public static IReadOnlyList<ProjectTemplate> All { get; } = [.. TypeKinds.Select(Type)];
+    public static IReadOnlyList<ProjectTemplate> All { get; } = [.. TypeKinds.Select(Type), LinqQuery()];
+
+    private static ProjectTemplate LinqQuery()
+    {
+        TemplateVariant variant = new($"Passenger.{"LinqQuery"}.CSharp", "C#", 0,
+            "A LINQPad-compatible C# query (.linq) with .Dump() HTML output and optional data source connections", null, [], null, []);
+        return new ProjectTemplate("LINQ Query", ["linq", "query"], "Passenger", ["Common", "Data"], "Query", [variant])
+        {
+            Own = new OwnTemplate(".linq", (name, _) => $"<Query Kind=\"Statements\" />\n\n// Write C# statements and call .Dump() to inspect results\n\"Hello from {name}\".Dump();\n"),
+        };
+    }
 
     /// <summary>A C# file declaring a type of a kind (<see cref="TypeKinds"/>), in a file-scoped namespace.</summary>
     public static string TypeText(string kind, string name, string space)

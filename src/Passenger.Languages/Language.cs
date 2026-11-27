@@ -163,7 +163,7 @@ public sealed class Language
         grammar: new("source.ini", "ini.tmLanguage.json"));
 
     /// <summary>C#, coloured and folded by its own parse; its grammar is only what Razor and Markdown's fences embed.</summary>
-    public static readonly Language CSharp = new(LanguageIds.CSharp, "C#", ["*.cs", "*.csx"], line: "//", block: ("/*", "*/"),
+    public static readonly Language CSharp = new(LanguageIds.CSharp, "C#", ["*.cs", "*.csx", "*.linq"], line: "//", block: ("/*", "*/"),
         grammar: new("source.cs", "csharp.tmLanguage.json"), service: LanguageService.CSharp, parsed: true);
 
     public static readonly Language Razor = new(LanguageIds.Razor, "Razor", ["*" + RazorFiles.Component, "*" + RazorFiles.Page], block: ("@*", "*@"),
@@ -199,7 +199,7 @@ public sealed class Language
     public static readonly Language Markdown = new("markdown", "Markdown", ["*.md", "*.markdown"], block: ("<!--", "-->"), indent: 2,
         grammar: new("text.html.markdown", "markdown.tmLanguage.json"), reindentsPaste: false);
 
-    public static readonly Language Html = new("html", "HTML", ["*.html", "*.htm"], block: ("<!--", "-->"),
+    public static readonly Language Html = new("html", "HTML", ["*.html", "*.htm", "*.vue", "*.svelte"], block: ("<!--", "-->"),
         grammar: new("text.html.basic", "html.tmLanguage.json", Tags.Html), service: LanguageService.Html, markup: MarkupKind.Html, literals: LiteralLines.Preformatted);
 
     public static readonly Language Css = new("css", "CSS", ["*.css"], block: ("/*", "*/"),

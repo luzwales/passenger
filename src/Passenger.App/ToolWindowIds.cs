@@ -30,6 +30,8 @@ public static class ToolWindowIds
     public const string Migrations = "migrations";
     public const string StepLibrary = "stepLibrary";
     public const string PiAgent = "piAgent";
+    public const string LinqResult = "linqResult";
+    public const string LinqConnections = "linqConnections";
 
     /// <summary>Every id above, which a theme's layout names windows by.</summary>
     public static IReadOnlySet<string> All { get; } = typeof(ToolWindowIds).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)

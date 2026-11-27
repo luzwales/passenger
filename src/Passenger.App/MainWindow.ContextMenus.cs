@@ -44,6 +44,26 @@ public partial class MainWindow
         List<Control> items = [];
         void Add(params MenuEntry[] entries) => items.AddRange(entries.Select(entry => FlyoutEntry(entry, context)));
         MenuEntry separator = new(null);
+        bool isLinq = active.Path.EndsWith(".linq", StringComparison.OrdinalIgnoreCase);
+        bool isSql = active.Path.EndsWith(".sql", StringComparison.OrdinalIgnoreCase);
+        if (isLinq || isSql)
+        {
+            if (isLinq)
+            {
+                Add(Item(A.RunLinq), Item(A.DebugLinq));
+            }
+            else
+            {
+                Add(Item(A.RunLinq));
+            }
+            Text.Selection primary = editor.Selections.Primary;
+            if (!primary.IsEmpty)
+            {
+                string selected = editor.Document.Snapshot.GetText(primary.Range);
+                items.Add(ToolWindows.ListMenus.Item("Run Selected Code", () => IdeErrors.Observe(RunActiveLinqAsync(debug: false, selectedBody: selected))));
+            }
+            Add(separator);
+        }
         Add(Item(A.QuickFix), separator, Item(E.Cut), Item(E.Copy), Item(E.Paste), separator,
             Item(A.FindUsages),
             Sub("Refactor", Item(A.RefactorThis), separator, Item(A.Rename), Item(A.ExtractMethod), Item(A.IntroduceVariable), Item(A.Inline)),

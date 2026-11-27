@@ -56,6 +56,7 @@ public sealed class StateStore
         Trust = new(Path.Combine(root, "trust.json"));
         Templates = new(Path.Combine(root, TemplatesFile));
         PiAgent = new(Path.Combine(root, "piAgent.json"));
+        LinqConnections = new(Path.Combine(root, "linqConnections.json"));
         NewSolution = new(Path.Combine(root, NewSolutionFile));
         // Before this process writes any: a change is written a moment after it is made, and only through this store.
         UsedBefore = new[] { Path.Combine(root, SettingsFile), Layout.Path, Recent.Path, Updates.Path }.Any(File.Exists)
@@ -187,6 +188,9 @@ public sealed class StateStore
     /// <summary>The Pi Agent's model profiles, active model, and sampling settings.</summary>
     public StateDocument<PiAgentState> PiAgent { get; }
 
+    /// <summary>Saved LINQ data source connections (SQLite, PostgreSQL, SQL Server, CSV, XLSX).</summary>
+    public StateDocument<Passenger.App.Linq.LinqConnectionsState> LinqConnections { get; }
+
     /// <summary>What New Solution made for Git with the last solution, which it offers next.</summary>
     public StateDocument<Passenger.App.Templates.RepositoryChoices> NewSolution { get; }
 
@@ -237,6 +241,7 @@ public sealed class StateStore
         Trust.Flush();
         Templates.Flush();
         PiAgent.Flush();
+        LinqConnections.Flush();
         NewSolution.Flush();
         foreach ((ProjectState documents, _) in projects.Values)
         {

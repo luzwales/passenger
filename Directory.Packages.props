@@ -249,7 +249,9 @@
     <PackageVersion Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="$(EfCoreVersion)" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="$(EfCoreVersion)" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="$(EfCoreVersion)" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="$(NpgsqlEfVersion)" />
+    <PackageVersion Include="MySqlConnector" Version="2.5.0" />
     <PackageVersion Include="ReactiveUI" Version="$(ReactiveUiVersion)" />
     <PackageVersion Include="ReactiveUI.SourceGenerators" Version="$(ReactiveUiGeneratorsVersion)" />
     <PackageVersion Include="Avalonia.Headless.XUnit" Version="12.2.0" />

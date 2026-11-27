@@ -1,0 +1,9 @@
+@MinimalApiApp_HostAddress = http://localhost:5000
+
+# Minimal API: lambda
+@a = 1
+@b = 1
+GET {{MinimalApiApp_HostAddress}}/add/{{a}}/{{b}}
+Accept: application/json
+
+###

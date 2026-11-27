@@ -100,6 +100,7 @@
     <ProjectReference Include="../Passenger.Core/Passenger.Core.csproj" />
     <ProjectReference Include="../Passenger.Editor/Passenger.Editor.csproj" />
     <ProjectReference Include="../Passenger.Languages/Passenger.Languages.csproj" />
+    <ProjectReference Include="../Passenger.Linq/Passenger.Linq.csproj" />
     <ProjectReference Include="../Passenger.Lsp/Passenger.Lsp.csproj" />
     <ProjectReference Include="../Passenger.Packages/Passenger.Packages.csproj" />
     <ProjectReference Include="../Passenger.Text/Passenger.Text.csproj" />
@@ -148,6 +149,9 @@
     <!-- Built first and carried under updatehandlers/, never linked: a program debugged with Hot Reload loads it
          (Debugging/UpdateHandlerHook.cs). It is built once for every platform. -->
     <ProjectReference Include="../Passenger.UpdateHandlers/Passenger.UpdateHandlers.csproj" ReferenceOutputAssembly="false" Private="false"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishReadyToRun" />
+    <!-- Built first and carried under linqruntime/, never linked: generated .linq runner projects reference it directly. -->
+    <ProjectReference Include="../Passenger.Linq.Runtime/Passenger.Linq.Runtime.csproj" ReferenceOutputAssembly="false" Private="false"
                       GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;PublishReadyToRun" />
     <Compile Include="../Passenger.UpdateHandlers/Wire.cs" Link="Debugging/UpdateHandlersWire.cs" />
     <!-- Built first and carried under host/, never linked: MSBuild's evaluation runs in its own process on the runtime
@@ -329,6 +333,19 @@
     <ItemGroup>
       <UpdateHandlersFile Include="@(UpdateHandlersAssembly->'%(RootDir)%(Directory)%(Filename).dll');@(UpdateHandlersAssembly->'%(RootDir)%(Directory)%(Filename).pdb')" />
       <None Include="@(UpdateHandlersFile)" Link="updatehandlers/%(UpdateHandlersFile.Filename)%(UpdateHandlersFile.Extension)"
+            CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The LINQ runtime becomes this project's output under linqruntime/: referenced by generated .linq runner projects. -->
+  <Target Name="IncludeLinqRuntime" BeforeTargets="AssignTargetPaths">
+    <MSBuild Projects="../Passenger.Linq.Runtime/Passenger.Linq.Runtime.csproj" Targets="GetTargetPath"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishReadyToRun" BuildInParallel="$(BuildInParallel)">
+      <Output TaskParameter="TargetOutputs" ItemName="LinqRuntimeAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <LinqRuntimeFile Include="@(LinqRuntimeAssembly->'%(RootDir)%(Directory)%(Filename).dll');@(LinqRuntimeAssembly->'%(RootDir)%(Directory)%(Filename).pdb')" />
+      <None Include="@(LinqRuntimeFile)" Link="linqruntime/%(LinqRuntimeFile.Filename)%(LinqRuntimeFile.Extension)"
             CopyToOutputDirectory="PreserveNewest" Visible="false" />
     </ItemGroup>
   </Target>

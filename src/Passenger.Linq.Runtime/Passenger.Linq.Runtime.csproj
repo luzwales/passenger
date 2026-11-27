@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runtime library referenced by executed .linq scripts: provides .Dump() extension methods,
+       recursive object-to-HTML table rendering, and live IPC streaming to Passenger's LinqResult window. -->
+  <PropertyGroup>
+    <RootNamespace>Passenger.Linq.Runtime</RootNamespace>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Passenger.UnitTests" />
+  </ItemGroup>
+</Project>

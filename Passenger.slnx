@@ -17,6 +17,8 @@
     <Project Path="src/Passenger.Inspector.Wpf/Passenger.Inspector.Wpf.csproj" />
     <Project Path="src/Passenger.Languages/Passenger.Languages.csproj" />
     <Project Path="src/Passenger.Launcher/Passenger.Launcher.csproj" />
+    <Project Path="src/Passenger.Linq/Passenger.Linq.csproj" />
+    <Project Path="src/Passenger.Linq.Runtime/Passenger.Linq.Runtime.csproj" />
     <Project Path="src/Passenger.Lsp/Passenger.Lsp.csproj" />
     <Project Path="src/Passenger.MauiPreview/Passenger.MauiPreview.csproj" />
     <Project Path="src/Passenger.Packages/Passenger.Packages.csproj" />

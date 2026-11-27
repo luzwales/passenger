@@ -4,7 +4,9 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
+using Passenger.Editor;
 using Passenger.Terminal;
+using Passenger.Text;
 using Passenger.Workspace;
 
 namespace Passenger.App;
@@ -22,10 +24,30 @@ public partial class MainWindow
     }
 
     private static void OnDragOver(object? sender, DragEventArgs e) =>
-        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) || e.DataTransfer.Contains(DataFormat.Text)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
 
     private void OnDrop(Window window, DragEventArgs e)
     {
+        if (!e.DataTransfer.Contains(DataFormat.File)
+            && e.DataTransfer.TryGetText() is { Length: > 0 } droppedText
+            && (e.Source as Visual)?.FindAncestorOfType<Editor.CodeEditor>(includeSelf: true) is { } editor
+            && Editors.Active is { IsReadOnly: false })
+        {
+            e.Handled = true;
+            e.DragEffects = DragDropEffects.Copy;
+            EditPlan plan = TextEditing.Insert(editor.Document.Snapshot, editor.Selections, droppedText);
+            editor.ApplyEdits(plan.Edits, plan.Selections);
+            editor.Focus();
+            if (Editors.Active is { IsReadOnly: false, Path: var activePath }
+                && activePath.EndsWith(".linq", StringComparison.OrdinalIgnoreCase)
+                && linqConnectionsView?.SelectedConnection is { } conn)
+            {
+                EnsureLinqConnectionHeader(editor, conn);
+            }
+            return;
+        }
         List<string> paths = [.. (e.DataTransfer.TryGetFiles() ?? []).Select(item => item.TryGetLocalPath()).OfType<string>()];
         if (paths.Count == 0)
         {
